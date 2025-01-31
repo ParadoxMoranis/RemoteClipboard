@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_RemotePostboard_FILE /home/paradox/Downloads/demo/build/RemotePostboard)
+set(__QT_DEPLOY_TARGET_RemotePostboard_TYPE EXECUTABLE)
