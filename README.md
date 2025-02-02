@@ -21,8 +21,10 @@ Share your paste board with other devices by net.
   ```bash
   mkdir build
   cd build
-  cmake .. -G "MinGW Makefile"
-  make
+  C:\path\to\your\qt\bin\cmake.exe .. -G "MinGW Makefiles"
+  mingw32-make
+  powershell -ExecutionPolicy Bypass -File deploy.ps1
+  .\build\dmo.exe
   ```
   
   ### Linux
@@ -46,14 +48,14 @@ Share your paste board with other devices by net.
   # Arch Linux
   sudo pacman -S nlohmann-json
   ```
-
+  
   --------------
-
+  
   mkdir build
   cd build
   cmake ..
   make
-
+  
   ./可执行文件 -p port [-u user -w password]
 
 ```

@@ -44,7 +44,12 @@ void MainWindow::onConnectClicked()
     }
 
     QString host = ui->serverAddressEdit->text();
-    quint16 port = ui->portSpinBox->value();
+    bool ok;
+    quint16 port = ui->portEdit->text().toUShort(&ok);
+    if (!ok || port < 1024 || port > 65535) {
+        QMessageBox::warning(this, "Error", "Please enter a valid port number (1024-65535)");
+        return;
+    }
     
     updateStatus("Connecting to server...");
     tcpClient->connectToServer(host, port);
