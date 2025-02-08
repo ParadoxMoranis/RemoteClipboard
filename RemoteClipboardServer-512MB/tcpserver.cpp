@@ -210,12 +210,7 @@ void TcpServer::handleClientData(SocketType clientSocket) {
         return;
     }
 
-    // 定义缓冲区大小常量
-    const size_t INITIAL_BUFFER_SIZE = 1 * 1024 * 1024;    // 初始 1MB
-    const size_t MAX_BUFFER_SIZE = 512 * 1024 * 1024;      // 最大 512MB
-    const size_t CHUNK_SIZE = 1 * 1024 * 1024;             // 增长步长 1MB
-
-    // 创建初始缓冲区
+    // 使用类中定义的常量
     std::vector<char> buffer;
     buffer.reserve(INITIAL_BUFFER_SIZE);
     buffer.resize(INITIAL_BUFFER_SIZE);

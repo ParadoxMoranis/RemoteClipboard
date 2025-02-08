@@ -1,7 +1,7 @@
 CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o: \
- /home/paradox/Downloads/RemoteClipboardServer/tcpserver.cpp \
+ /home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/tcpserver.cpp \
  /usr/include/stdc-predef.h \
- /home/paradox/Downloads/RemoteClipboardServer/tcpserver.h \
+ /home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/tcpserver.h \
  /usr/include/c++/14.2.1/string \
  /usr/include/c++/14.2.1/bits/requires_hosted.h \
  /usr/include/c++/14.2.1/x86_64-pc-linux-gnu/bits/c++config.h \

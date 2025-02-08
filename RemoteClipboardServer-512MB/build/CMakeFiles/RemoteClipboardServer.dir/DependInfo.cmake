@@ -8,8 +8,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/paradox/Downloads/RemoteClipboardServer/server_main.cpp" "CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o" "gcc" "CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o.d"
-  "/home/paradox/Downloads/RemoteClipboardServer/tcpserver.cpp" "CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o" "gcc" "CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o.d"
+  "/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/server_main.cpp" "CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o" "gcc" "CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o.d"
+  "/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/tcpserver.cpp" "CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o" "gcc" "CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o.d"
   "" "RemoteClipboardServer" "gcc" "CMakeFiles/RemoteClipboardServer.dir/link.d"
   )
 

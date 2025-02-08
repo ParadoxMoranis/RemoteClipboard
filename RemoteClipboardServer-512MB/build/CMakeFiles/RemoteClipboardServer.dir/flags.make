@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/paradox/Downloads/RemoteClipboardServer/include
+CXX_INCLUDES = -I/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/include
 
 CXX_FLAGS = -std=gnu++17
 

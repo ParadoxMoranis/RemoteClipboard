@@ -1,5 +1,5 @@
 CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o: \
- /home/paradox/Downloads/RemoteClipboardServer/server_main.cpp \
+ /home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/server_main.cpp \
  /usr/include/stdc-predef.h /usr/include/c++/14.2.1/iostream \
  /usr/include/c++/14.2.1/bits/requires_hosted.h \
  /usr/include/c++/14.2.1/x86_64-pc-linux-gnu/bits/c++config.h \
@@ -164,7 +164,7 @@ CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o: \
  /usr/include/bits/stdint-least.h /usr/include/c++/14.2.1/limits \
  /usr/include/c++/14.2.1/ctime \
  /usr/include/c++/14.2.1/bits/parse_numbers.h \
- /home/paradox/Downloads/RemoteClipboardServer/tcpserver.h \
+ /home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/tcpserver.h \
  /usr/include/c++/14.2.1/vector \
  /usr/include/c++/14.2.1/bits/stl_uninitialized.h \
  /usr/include/c++/14.2.1/bits/stl_vector.h \
