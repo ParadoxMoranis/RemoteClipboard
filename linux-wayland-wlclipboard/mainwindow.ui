@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>400</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Remote Clipboard Client</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QGroupBox" name="clientGroup">
+      <property name="title">
+       <string>Connection Settings</string>
+      </property>
+      <layout class="QGridLayout" name="gridLayout">
+       <item row="0" column="0">
+         <widget class="QLabel" name="serverLabel">
+           <property name="text">
+             <string>Server:</string>
+           </property>
+         </widget>
+       </item>
+       <item row="0" column="1">
+         <widget class="QLineEdit" name="serverAddressEdit">
+           <property name="text">
+             <string>localhost</string>
+           </property>
+         </widget>
+       </item>
+       <item row="1" column="0">
+         <widget class="QLabel" name="portLabel">
+           <property name="text">
+             <string>Port:</string>
+           </property>
+         </widget>
+       </item>
+       <item row="1" column="1">
+         <widget class="QSpinBox" name="portSpinBox">
+           <property name="minimum">
+             <number>1024</number>
+           </property>
+           <property name="maximum">
+             <number>65535</number>
+           </property>
+           <property name="value">
+             <number>8080</number>
+           </property>
+         </widget>
+       </item>
+       <item row="2" column="0">
+         <widget class="QLabel" name="usernameLabel">
+           <property name="text">
+             <string>Username:</string>
+           </property>
+         </widget>
+       </item>
+       <item row="2" column="1">
+         <widget class="QLineEdit" name="usernameEdit"/>
+       </item>
+       <item row="3" column="0">
+         <widget class="QLabel" name="passwordLabel">
+           <property name="text">
+             <string>Password:</string>
+           </property>
+         </widget>
+       </item>
+       <item row="3" column="1">
+         <widget class="QLineEdit" name="passwordEdit">
+           <property name="echoMode">
+             <enum>QLineEdit::Password</enum>
+           </property>
+         </widget>
+       </item>
+       <item row="4" column="0" colspan="2">
+         <widget class="QPushButton" name="btnConnect">
+           <property name="text">
+             <string>Connect</string>
+           </property>
+         </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QTextEdit" name="logTextEdit">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
