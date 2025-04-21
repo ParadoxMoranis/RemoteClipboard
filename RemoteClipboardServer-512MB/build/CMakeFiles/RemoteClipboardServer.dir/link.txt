@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/RemoteClipboardServer.dir/link.d CMakeFiles/RemoteClipboardServer.dir/server_main.cpp.o CMakeFiles/RemoteClipboardServer.dir/tcpserver.cpp.o -o RemoteClipboardServer

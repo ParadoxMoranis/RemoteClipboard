@@ -1,3 +1,0 @@
-/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/build/CMakeFiles/RemoteClipboardServer.dir
-/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/build/CMakeFiles/edit_cache.dir
-/home/paradox/Projects/RemotePasteboard/RemoteClipboardServer-512MB/build/CMakeFiles/rebuild_cache.dir
