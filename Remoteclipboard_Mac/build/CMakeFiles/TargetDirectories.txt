@@ -1,0 +1,3 @@
+/home/paradox/Projects/clip-cli/build/CMakeFiles/clipboard_sync.dir
+/home/paradox/Projects/clip-cli/build/CMakeFiles/edit_cache.dir
+/home/paradox/Projects/clip-cli/build/CMakeFiles/rebuild_cache.dir
