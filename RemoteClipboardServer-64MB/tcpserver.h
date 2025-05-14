@@ -38,6 +38,10 @@ public:
 
 class TcpServer {
 public:
+    static constexpr size_t MAX_BUFFER_SIZE = 512 * 1024 * 1024;  // 512MB
+    static constexpr size_t INITIAL_BUFFER_SIZE = 1 * 1024 * 1024;  // 1MB
+    static constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024;  // 1MB
+
     TcpServer();
     ~TcpServer();
 
@@ -45,6 +49,7 @@ public:
     bool startServer(uint16_t port);
     void stopServer();
     void processEvents();
+    void processClientBuffer(Client& client);
 
 private:
     void handleNewConnection();

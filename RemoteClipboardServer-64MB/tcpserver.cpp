@@ -208,10 +208,21 @@ void TcpServer::handleClientThread(SocketType clientSocket) {
 void TcpServer::handleClientData(SocketType clientSocket) {
     // 验证客户端是否存在
     if (clients.find(clientSocket) == clients.end()) {
-        std::cerr << "Error: Client socket " << clientSocket << " not found in clients map" << std::endl;
         return;
     }
 
+<<<<<<< HEAD:RemoteClipboardServer/tcpserver.cpp
+    // 使用类中定义的常量
+    std::vector<char> buffer;
+    buffer.reserve(INITIAL_BUFFER_SIZE);
+    buffer.resize(INITIAL_BUFFER_SIZE);
+
+    int bytesRead;
+    try {
+        // 首次读取数据
+        bytesRead = recv(clientSocket, buffer.data(), buffer.size() - 1, 0);
+        
+=======
     // 设置接收缓冲区大小（64MB）
     const size_t BUFFER_SIZE = 64 * 1024 * 1024;
     std::vector<char> buffer(BUFFER_SIZE);
@@ -222,10 +233,14 @@ void TcpServer::handleClientData(SocketType clientSocket) {
         bytesRead = recv(clientSocket, buffer.data(), buffer.size() - 1, 0);
         
         // 处理接收错误
+>>>>>>> b7807993ddf297830fe9894667b7ffe6c0e20482:RemoteClipboardServer-64MB/tcpserver.cpp
         if (bytesRead < 0) {
 #ifdef _WIN32
             int error = WSAGetLastError();
             if (error != WSAEWOULDBLOCK) {
+<<<<<<< HEAD:RemoteClipboardServer/tcpserver.cpp
+                throw std::runtime_error("Connection error");
+=======
                 std::cerr << "Recv failed for socket " << clientSocket 
                           << " with error: " << error << std::endl;
                 throw std::runtime_error("Connection error");
@@ -319,16 +334,149 @@ void TcpServer::handleClientData(SocketType clientSocket) {
             } catch (const json::parse_error& e) {
                 std::cerr << "JSON parse error: " << e.what() << std::endl;
                 std::cerr << "Invalid JSON: " << jsonStr << std::endl;
+>>>>>>> b7807993ddf297830fe9894667b7ffe6c0e20482:RemoteClipboardServer-64MB/tcpserver.cpp
             }
+#else
+            if (errno != EWOULDBLOCK && errno != EAGAIN) {
+                throw std::runtime_error("Connection error");
+            }
+#endif
+            return;
+        }
 
+<<<<<<< HEAD:RemoteClipboardServer/tcpserver.cpp
+        if (bytesRead == 0) {
+            throw std::runtime_error("Connection closed by peer");
+        }
+
+        // 如果数据接近缓冲区大小，继续读取
+        while (bytesRead >= static_cast<int>(buffer.size() - 1)) {
+            size_t newSize = std::min(buffer.size() + CHUNK_SIZE, MAX_BUFFER_SIZE);
+            if (newSize == buffer.size()) {
+                // 已达到最大缓冲区大小
+                break;
+            }
+            
+            std::cout << "Expanding receive buffer to " << (newSize / (1024 * 1024)) 
+                      << "MB for client " << clientSocket << std::endl;
+            
+            buffer.resize(newSize);
+            int additionalBytes = recv(clientSocket, buffer.data() + bytesRead, 
+                                     buffer.size() - bytesRead - 1, 0);
+            if (additionalBytes <= 0) break;
+            bytesRead += additionalBytes;
+        }
+
+        buffer[bytesRead] = '\0';
+        auto& client = clients[clientSocket];
+
+        // 检查客户端累积缓冲区大小
+        if (client->buffer.length() + bytesRead > MAX_BUFFER_SIZE) {
+            std::cout << "Warning: Client " << clientSocket 
+                      << " buffer would exceed " << (MAX_BUFFER_SIZE / (1024 * 1024)) 
+                      << "MB limit. Processing existing data first." << std::endl;
+            
+            // 处理现有数据
+            processClientBuffer(*client);
+            
+            // 如果处理后缓冲区仍然太大，清空它
+            if (client->buffer.length() > MAX_BUFFER_SIZE / 2) {
+                std::cout << "Clearing client buffer due to size limit" << std::endl;
+                client->buffer.clear();
+                client->buffer.shrink_to_fit();
+            }
+        }
+
+        // 添加新数据到客户端缓冲区
+        client->buffer.append(buffer.data(), bytesRead);
+        std::cout << "Client " << clientSocket << " buffer size: " 
+                  << (client->buffer.length() / (1024.0 * 1024.0)) << "MB" << std::endl;
+
+        // 处理接收到的数据
+        processClientBuffer(*client);
+
+    } catch (const std::bad_alloc& e) {
+        std::cerr << "Memory allocation failed: " << e.what() << std::endl;
+        // 尝试恢复
+        if (auto it = clients.find(clientSocket); it != clients.end()) {
+            it->second->buffer.clear();
+            it->second->buffer.shrink_to_fit();
+=======
             // 移除已处理的消息
             client->buffer.erase(0, end + 1);
             start = 0; // 重置搜索位置
+>>>>>>> b7807993ddf297830fe9894667b7ffe6c0e20482:RemoteClipboardServer-64MB/tcpserver.cpp
         }
     } catch (const std::exception& e) {
         std::cerr << "Error processing data for client " << clientSocket 
                   << ": " << e.what() << std::endl;
+<<<<<<< HEAD:RemoteClipboardServer/tcpserver.cpp
+        throw;
+    }
+}
+
+// 处理客户端缓冲区数据
+void TcpServer::processClientBuffer(Client& client) {
+    size_t start = 0;
+    while ((start = client.buffer.find_first_of('{', start)) != std::string::npos) {
+        // 查找匹配的结束括号
+        size_t depth = 1;
+        size_t end = start + 1;
+        while (end < client.buffer.length() && depth > 0) {
+            if (client.buffer[end] == '{') depth++;
+            if (client.buffer[end] == '}') depth--;
+            end++;
+        }
+
+        if (depth > 0) {
+            // JSON 不完整，等待更多数据
+            break;
+        }
+
+        end--; // 回退到最后一个 '}'
+        std::string jsonStr = client.buffer.substr(start, end - start + 1);
+        
+        try {
+            auto jsonData = json::parse(jsonStr);
+            if (jsonData.contains("type")) {
+                std::string msgType = jsonData["type"].get<std::string>();
+                
+                if (msgType == "auth") {
+                    client.authenticated = authenticateClient(client, jsonData);
+                } 
+                else if (msgType == "clipboard") {
+                    if (!client.authenticated) {
+                        json authRequiredMsg;
+                        authRequiredMsg["type"] = "error";
+                        authRequiredMsg["message"] = "Authentication required";
+                        std::string response = authRequiredMsg.dump() + "\n";
+                        send(client.socket, response.c_str(), response.length(), 0);
+                    } else if (jsonData.contains("content")) {
+                        broadcastClipboardData(jsonStr, client.socket);
+                    }
+                }
+            }
+        } catch (const json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+        }
+
+        // 移除已处理的数据
+        client.buffer.erase(0, end + 1);
+        start = 0;
+    }
+
+    // 如果缓冲区已经很大但没有完整的JSON，可能是无效数据
+    if (client.buffer.length() > MAX_BUFFER_SIZE / 2) {
+        std::cout << "Warning: Large incomplete buffer detected. Clearing." << std::endl;
+        client.buffer.clear();
+    }
+
+    // 定期释放未使用的内存
+    if (client.buffer.capacity() > client.buffer.length() * 2) {
+        client.buffer.shrink_to_fit();
+=======
         throw; // 重新抛出异常以便上层处理
+>>>>>>> b7807993ddf297830fe9894667b7ffe6c0e20482:RemoteClipboardServer-64MB/tcpserver.cpp
     }
 }
 
