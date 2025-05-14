@@ -1,0 +1,3 @@
+/home/paradox/Projects/RemotePasteboard/RemoteclipboardCliForLinux/build/CMakeFiles/clipboard_sync.dir
+/home/paradox/Projects/RemotePasteboard/RemoteclipboardCliForLinux/build/CMakeFiles/edit_cache.dir
+/home/paradox/Projects/RemotePasteboard/RemoteclipboardCliForLinux/build/CMakeFiles/rebuild_cache.dir

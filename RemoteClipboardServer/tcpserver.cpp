@@ -207,121 +207,156 @@ void TcpServer::handleClientThread(SocketType clientSocket) {
 
 void TcpServer::handleClientData(SocketType clientSocket) {
     if (clients.find(clientSocket) == clients.end()) {
-        std::cerr << "Error: Client socket " << clientSocket << " not found in clients map" << std::endl;
         return;
     }
 
-    char buffer[4096];
+    // 使用类中定义的常量
+    std::vector<char> buffer;
+    buffer.reserve(INITIAL_BUFFER_SIZE);
+    buffer.resize(INITIAL_BUFFER_SIZE);
+
     int bytesRead;
-
-    bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    
-    // 添加详细的错误处理和调试信息
-#ifdef _WIN32
-    if (bytesRead == SOCKET_ERROR) {
-        int error = WSAGetLastError();
-        if (error != WSAEWOULDBLOCK) {
-            std::cerr << "Recv failed for socket " << clientSocket 
-                      << " with error: " << error << std::endl;
-            throw std::runtime_error("Connection error");
-        }
-        return;
-    }
-#else
-    if (bytesRead < 0) {
-        if (errno != EWOULDBLOCK && errno != EAGAIN) {
-            std::cerr << "Recv failed for socket " << clientSocket 
-                      << " with error: " << errno << std::endl;
-            throw std::runtime_error("Connection error");
-        }
-        return;
-    }
-#endif
-
-    if (bytesRead == 0) {
-        std::cout << "Client " << clientSocket << " closed connection" << std::endl;
-        throw std::runtime_error("Connection closed by peer");
-    }
-
-    buffer[bytesRead] = '\0';
-    auto& client = clients[clientSocket];
-    client->buffer += buffer;
-
-    std::cout << "Received " << bytesRead << " bytes from client " << clientSocket 
-              << ", Current buffer size: " << client->buffer.length() << std::endl;
-    std::cout << "Raw data: " << buffer << std::endl;
-    std::cout << "Client authentication status: " 
-              << (client->authenticated ? "authenticated" : "not authenticated") << std::endl;
-
-    // 尝试处理完整的JSON消息
     try {
-        size_t start = client->buffer.find_first_of('{');
-        while (start != std::string::npos) {
-            size_t end = client->buffer.find_first_of('}', start);
-            if (end == std::string::npos) break;
-
-            std::string jsonStr = client->buffer.substr(start, end - start + 1);
-            
-            std::cout << "Processing JSON from client " << clientSocket 
-                      << ": " << jsonStr << std::endl;
-            
-            try {
-                auto jsonData = json::parse(jsonStr);
-                
-                if (!jsonData.contains("type")) {
-                    std::cerr << "Message missing 'type' field from client " 
-                              << clientSocket << std::endl;
-                    continue;
-                }
-
-                std::string msgType = jsonData["type"].get<std::string>();
-                std::cout << "Message type: " << msgType << " from client " 
-                          << clientSocket << std::endl;
-                
-                if (msgType == "auth") {
-                    bool authResult = authenticateClient(*client, jsonData);
-                    std::cout << "Authentication attempt for client " << clientSocket 
-                              << " result: " << (authResult ? "success" : "failed") << std::endl;
-                } 
-                else if (msgType == "clipboard") {
-                    if (!client->authenticated) {
-                        std::cout << "Warning: Unauthenticated client " << clientSocket 
-                                  << " trying to send clipboard data. Sending auth required message." << std::endl;
-                        
-                        // 发送认证要求消息
-                        json authRequiredMsg;
-                        authRequiredMsg["type"] = "error";
-                        authRequiredMsg["message"] = "Authentication required";
-                        std::string response = authRequiredMsg.dump() + "\n";
-                        send(clientSocket, response.c_str(), response.length(), 0);
-                        
-                        client->buffer.erase(0, end + 1);
-                        return;
-                    }
-                    
-                    if (jsonData.contains("content")) {
-                        std::string content = jsonData["content"].get<std::string>();
-                        std::cout << "\n=== Clipboard Update ===\n"
-                                  << "From client: " << clientSocket << "\n"
-                                  << "Content: " << content << "\n"
-                                  << "=====================\n" << std::endl;
-                        
-                        broadcastClipboardData(jsonStr, clientSocket);
-                    }
-                }
-            } catch (const json::parse_error& e) {
-                std::cerr << "JSON parse error for client " << clientSocket 
-                          << ": " << e.what() << std::endl;
-                std::cerr << "Invalid message: " << jsonStr << std::endl;
+        // 首次读取数据
+        bytesRead = recv(clientSocket, buffer.data(), buffer.size() - 1, 0);
+        
+        if (bytesRead < 0) {
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error != WSAEWOULDBLOCK) {
+                throw std::runtime_error("Connection error");
             }
+#else
+            if (errno != EWOULDBLOCK && errno != EAGAIN) {
+                throw std::runtime_error("Connection error");
+            }
+#endif
+            return;
+        }
 
-            // 移除已处理的消息
-            client->buffer.erase(0, end + 1);
-            start = client->buffer.find_first_of('{');
+        if (bytesRead == 0) {
+            throw std::runtime_error("Connection closed by peer");
+        }
+
+        // 如果数据接近缓冲区大小，继续读取
+        while (bytesRead >= static_cast<int>(buffer.size() - 1)) {
+            size_t newSize = std::min(buffer.size() + CHUNK_SIZE, MAX_BUFFER_SIZE);
+            if (newSize == buffer.size()) {
+                // 已达到最大缓冲区大小
+                break;
+            }
+            
+            std::cout << "Expanding receive buffer to " << (newSize / (1024 * 1024)) 
+                      << "MB for client " << clientSocket << std::endl;
+            
+            buffer.resize(newSize);
+            int additionalBytes = recv(clientSocket, buffer.data() + bytesRead, 
+                                     buffer.size() - bytesRead - 1, 0);
+            if (additionalBytes <= 0) break;
+            bytesRead += additionalBytes;
+        }
+
+        buffer[bytesRead] = '\0';
+        auto& client = clients[clientSocket];
+
+        // 检查客户端累积缓冲区大小
+        if (client->buffer.length() + bytesRead > MAX_BUFFER_SIZE) {
+            std::cout << "Warning: Client " << clientSocket 
+                      << " buffer would exceed " << (MAX_BUFFER_SIZE / (1024 * 1024)) 
+                      << "MB limit. Processing existing data first." << std::endl;
+            
+            // 处理现有数据
+            processClientBuffer(*client);
+            
+            // 如果处理后缓冲区仍然太大，清空它
+            if (client->buffer.length() > MAX_BUFFER_SIZE / 2) {
+                std::cout << "Clearing client buffer due to size limit" << std::endl;
+                client->buffer.clear();
+                client->buffer.shrink_to_fit();
+            }
+        }
+
+        // 添加新数据到客户端缓冲区
+        client->buffer.append(buffer.data(), bytesRead);
+        std::cout << "Client " << clientSocket << " buffer size: " 
+                  << (client->buffer.length() / (1024.0 * 1024.0)) << "MB" << std::endl;
+
+        // 处理接收到的数据
+        processClientBuffer(*client);
+
+    } catch (const std::bad_alloc& e) {
+        std::cerr << "Memory allocation failed: " << e.what() << std::endl;
+        // 尝试恢复
+        if (auto it = clients.find(clientSocket); it != clients.end()) {
+            it->second->buffer.clear();
+            it->second->buffer.shrink_to_fit();
         }
     } catch (const std::exception& e) {
         std::cerr << "Error processing data for client " << clientSocket 
                   << ": " << e.what() << std::endl;
+        throw;
+    }
+}
+
+// 处理客户端缓冲区数据
+void TcpServer::processClientBuffer(Client& client) {
+    size_t start = 0;
+    while ((start = client.buffer.find_first_of('{', start)) != std::string::npos) {
+        // 查找匹配的结束括号
+        size_t depth = 1;
+        size_t end = start + 1;
+        while (end < client.buffer.length() && depth > 0) {
+            if (client.buffer[end] == '{') depth++;
+            if (client.buffer[end] == '}') depth--;
+            end++;
+        }
+
+        if (depth > 0) {
+            // JSON 不完整，等待更多数据
+            break;
+        }
+
+        end--; // 回退到最后一个 '}'
+        std::string jsonStr = client.buffer.substr(start, end - start + 1);
+        
+        try {
+            auto jsonData = json::parse(jsonStr);
+            if (jsonData.contains("type")) {
+                std::string msgType = jsonData["type"].get<std::string>();
+                
+                if (msgType == "auth") {
+                    client.authenticated = authenticateClient(client, jsonData);
+                } 
+                else if (msgType == "clipboard") {
+                    if (!client.authenticated) {
+                        json authRequiredMsg;
+                        authRequiredMsg["type"] = "error";
+                        authRequiredMsg["message"] = "Authentication required";
+                        std::string response = authRequiredMsg.dump() + "\n";
+                        send(client.socket, response.c_str(), response.length(), 0);
+                    } else if (jsonData.contains("content")) {
+                        broadcastClipboardData(jsonStr, client.socket);
+                    }
+                }
+            }
+        } catch (const json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+        }
+
+        // 移除已处理的数据
+        client.buffer.erase(0, end + 1);
+        start = 0;
+    }
+
+    // 如果缓冲区已经很大但没有完整的JSON，可能是无效数据
+    if (client.buffer.length() > MAX_BUFFER_SIZE / 2) {
+        std::cout << "Warning: Large incomplete buffer detected. Clearing." << std::endl;
+        client.buffer.clear();
+    }
+
+    // 定期释放未使用的内存
+    if (client.buffer.capacity() > client.buffer.length() * 2) {
+        client.buffer.shrink_to_fit();
     }
 }
 
@@ -336,23 +371,26 @@ void TcpServer::removeClient(SocketType clientSocket) {
 
 bool TcpServer::authenticateClient(Client& client, const json& jsonData) {
     try {
+        // 验证JSON数据中是否包含必要的认证字段
         if (!jsonData.contains("username") || !jsonData.contains("password")) {
             std::cerr << "Missing username or password in JSON" << std::endl;
             return false;
         }
         
+        // 获取认证信息
         std::string receivedUsername = jsonData["username"].get<std::string>();
         std::string receivedPassword = jsonData["password"].get<std::string>();
         
         std::cout << "Socket " << client.socket << " - Received credentials - Username: " 
                   << receivedUsername << ", Password length: " << receivedPassword.length() << std::endl;
         
+        // 验证用户名和密码
         bool authenticated = (receivedUsername == username && receivedPassword == password);
         
         // 设置客户端的认证状态
         client.authenticated = authenticated;
         
-        // 构造JSON响应
+        // 构造认证响应
         json responseJson;
         responseJson["type"] = "auth_response";
         responseJson["status"] = authenticated ? "ok" : "failed";
@@ -361,7 +399,7 @@ bool TcpServer::authenticateClient(Client& client, const json& jsonData) {
         std::cout << "Socket " << client.socket << " - Authentication " 
                   << (authenticated ? "successful" : "failed") << std::endl;
         
-        // 确保响应被完整发送
+        // 发送认证响应
         int totalSent = 0;
         int len = response.length();
         while (totalSent < len) {
@@ -383,23 +421,64 @@ bool TcpServer::authenticateClient(Client& client, const json& jsonData) {
 void TcpServer::broadcastClipboardData(const std::string& data, SocketType excludeSocket) {
     std::lock_guard<std::mutex> lock(clientsMutex);
     
-    try {
-        auto jsonData = json::parse(data);
-        std::string content = jsonData["content"].get<std::string>();
-        
-        std::cout << "\n=== Broadcasting Clipboard ===\n"
-                  << "Content: " << content << "\n"
-                  << "To clients: ";
-        
-        for (const auto& pair : clients) {
-            if (pair.first != excludeSocket && pair.second->authenticated) {
-                std::string message = data + "\n";
-                send(pair.first, message.c_str(), message.length(), 0);
-                std::cout << pair.first << " ";
+    // 添加换行符到消息末尾
+    std::string message = data + "\n";
+    
+    // 设置发送缓冲区大小（64MB）
+    const int SEND_BUFFER_SIZE = 64 * 1024 * 1024;
+    for (const auto& pair : clients) {
+        // 跳过发送源客户端和未认证的客户端
+        if (pair.first != excludeSocket && pair.second->authenticated) {
+            // 设置socket发送缓冲区大小
+#ifdef _WIN32
+            if (setsockopt(pair.first, SOL_SOCKET, SO_SNDBUF, 
+                          (char*)&SEND_BUFFER_SIZE, sizeof(SEND_BUFFER_SIZE)) != 0) {
+#else
+            if (setsockopt(pair.first, SOL_SOCKET, SO_SNDBUF, 
+                          &SEND_BUFFER_SIZE, sizeof(SEND_BUFFER_SIZE)) != 0) {
+#endif
+                std::cerr << "Failed to set send buffer size for client " 
+                          << pair.first << std::endl;
             }
+            
+            // 分块发送大型数据
+            size_t totalSent = 0;
+            const size_t chunkSize = 1024 * 1024;  // 1MB chunks
+            
+            while (totalSent < message.length()) {
+                size_t remaining = message.length() - totalSent;
+                size_t currentChunkSize = std::min(chunkSize, remaining);
+                
+                // 发送数据块
+                int sent = send(pair.first, 
+                              message.c_str() + totalSent, 
+                              currentChunkSize, 
+                              0);
+                
+                if (sent <= 0) {
+                    std::cerr << "Failed to send to client " << pair.first << std::endl;
+                    break;
+                }
+                
+                totalSent += sent;
+                
+                // 显示发送进度（仅针对大于1MB的消息）
+                if (message.length() > 1024 * 1024) {
+                    float progress = (totalSent * 100.0f) / message.length();
+                    std::cout << "\rProgress for client " << pair.first 
+                              << ": " << std::fixed << std::setprecision(2) 
+                              << progress << "%" << std::flush;
+                }
+            }
+            
+            // 大消息发送完成后换行
+            if (message.length() > 1024 * 1024) {
+                std::cout << std::endl;
+            }
+            
+            // 输出发送统计信息
+            std::cout << "Broadcasted " << (totalSent / 1024.0) << "KB to client " 
+                      << pair.first << std::endl;
         }
-        std::cout << "\n===========================\n" << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "Error broadcasting clipboard data: " << e.what() << std::endl;
     }
 }
