@@ -1,0 +1,3 @@
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboardServer-512MB/build/CMakeFiles/RemoteClipboardServer.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboardServer-512MB/build/CMakeFiles/edit_cache.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboardServer-512MB/build/CMakeFiles/rebuild_cache.dir

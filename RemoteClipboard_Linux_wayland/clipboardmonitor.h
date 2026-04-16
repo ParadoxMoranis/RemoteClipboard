@@ -2,7 +2,6 @@
 #define CLIPBOARDMONITOR_H
 
 #include <QObject>
-#include <QProcess>
 #include <QTimer>
 
 class ClipboardMonitor : public QObject
@@ -14,21 +13,24 @@ public:
 
     void startMonitoring();
     void stopMonitoring();
-    void setClipboardContent(const QString &content);
+    void setClipboardText(const QString &content);
 
 signals:
-    void clipboardChanged(const QString &content);
+    void textChanged(const QString &content);
+    void filesChanged(const QStringList& filePaths);
 
 private slots:
     void checkClipboard();
 
 private:
-    QString getClipboardContent();
-    void setWlClipboard(const QString &content);
-    
+    QString runCommand(const QString& program, const QStringList& arguments) const;
+    QStringList readClipboardFiles() const;
+    QString readClipboardText() const;
+    QString buildSignatureForFiles(const QStringList& filePaths) const;
+
     QTimer *checkTimer;
-    QString lastContent;
+    QString lastSignature;
     bool isMonitoring;
 };
 
-#endif // CLIPBOARDMONITOR_H 
+#endif // CLIPBOARDMONITOR_H

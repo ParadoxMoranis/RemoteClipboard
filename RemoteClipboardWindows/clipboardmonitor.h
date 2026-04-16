@@ -3,7 +3,6 @@
 
 #include <QObject>
 #include <QClipboard>
-#include <QApplication>
 #include <QTimer>
 
 class ClipboardMonitor : public QObject
@@ -12,17 +11,19 @@ class ClipboardMonitor : public QObject
 public:
     explicit ClipboardMonitor(QObject *parent = nullptr);
     void startMonitoring();
-    void setClipboardContent(const QString &content);
+    void stopMonitoring();
+    void setClipboardText(const QString &content);
 
 signals:
-    void clipboardChanged(const QString &content);
+    void textChanged(const QString &content);
+    void filesChanged(const QStringList& filePaths);
 
 private slots:
     void checkClipboard();
 
 private:
     QClipboard *clipboard;
-    QString lastContent;
+    QString lastSignature;
     QTimer *timer;
 };
 

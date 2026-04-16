@@ -1,0 +1,9 @@
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/RemotePostboard.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/edit_cache.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/rebuild_cache.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/list_install_components.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/install.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/install/local.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/install/strip.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/RemotePostboard_autogen_timestamp_deps.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/CMakeFiles/RemotePostboard_autogen.dir

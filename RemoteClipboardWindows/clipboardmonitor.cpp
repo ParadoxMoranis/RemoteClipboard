@@ -1,5 +1,8 @@
 #include "clipboardmonitor.h"
-#include <QDebug>
+
+#include <QApplication>
+#include <QMimeData>
+#include <QUrl>
 
 ClipboardMonitor::ClipboardMonitor(QObject *parent)
     : QObject(parent)
@@ -7,39 +10,56 @@ ClipboardMonitor::ClipboardMonitor(QObject *parent)
     , timer(new QTimer(this))
 {
     connect(timer, &QTimer::timeout, this, &ClipboardMonitor::checkClipboard);
-    timer->setInterval(100); // Check every 100ms
+    timer->setInterval(500);
 }
 
 void ClipboardMonitor::startMonitoring()
 {
-    lastContent = clipboard->text();
+    checkClipboard();
     timer->start();
+}
+
+void ClipboardMonitor::stopMonitoring()
+{
+    timer->stop();
 }
 
 void ClipboardMonitor::checkClipboard()
 {
-    QString currentContent = clipboard->text();
-    if (currentContent != lastContent) {
-        lastContent = currentContent;
-        emit clipboardChanged(currentContent);
+    const QMimeData* mimeData = clipboard->mimeData();
+    if (mimeData != nullptr && mimeData->hasUrls()) {
+        QStringList filePaths;
+        const auto urls = mimeData->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile()) {
+                filePaths.append(url.toLocalFile());
+            }
+        }
+
+        const QString signature = QStringLiteral("files:") + filePaths.join(QStringLiteral("|"));
+        if (!filePaths.isEmpty() && signature != lastSignature) {
+            lastSignature = signature;
+            emit filesChanged(filePaths);
+            return;
+        }
+    }
+
+    const QString currentContent = clipboard->text();
+    const QString signature = QStringLiteral("text:") + currentContent;
+    if (signature != lastSignature) {
+        lastSignature = signature;
+        emit textChanged(currentContent);
     }
 }
 
-void ClipboardMonitor::setClipboardContent(const QString &content)
+void ClipboardMonitor::setClipboardText(const QString &content)
 {
     if (content.isEmpty()) {
         return;
     }
 
-    // 暂时停止监听以避免循环
     timer->stop();
-    
-    // 设置新的剪贴板内容
     clipboard->setText(content);
-    lastContent = content;
-    
-    // 恢复监听
+    lastSignature = QStringLiteral("text:") + content;
     timer->start();
-    
-    qDebug() << "Clipboard content updated:" << content;
 }

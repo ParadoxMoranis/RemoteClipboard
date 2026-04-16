@@ -1,20 +1,44 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
 #include "clipboardmonitor.h"
-#include "tcpclient.h"
+#include "ui_mainwindow.h"
+
+#include <QCheckBox>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QHBoxLayout>
+#include <QJsonArray>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
-#include <QDebug>
-#include <QJsonObject>
-#include <QJsonDocument>
+#include <QMimeDatabase>
+#include <QPushButton>
+#include <QSettings>
+#include <QStandardPaths>
+
+namespace {
+constexpr qint64 kMaxFileBundleBytes = 32ll * 1024ll * 1024ll;
+constexpr auto kSettingsOrganization = "RemoteClipboard";
+constexpr auto kSettingsApplication = "RemoteClipboardWindowsClient";
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , clipboardMonitor(new ClipboardMonitor(this))
     , tcpClient(new TcpClient(this))
+    , tlsCheckBox(nullptr)
+    , caCertificateEdit(nullptr)
+    , receiveDirectoryEdit(nullptr)
 {
     ui->setupUi(this);
+    setupAdvancedControls();
+    loadSettings();
     setupConnections();
+    updateConnectButton();
 }
 
 MainWindow::~MainWindow()
@@ -26,170 +50,356 @@ void MainWindow::setupConnections()
 {
     connect(ui->btnConnect, &QPushButton::clicked,
             this, &MainWindow::onConnectClicked);
-    
-    connect(clipboardMonitor, &ClipboardMonitor::clipboardChanged,
-            this, &MainWindow::onClipboardChanged);
-    
+
+    connect(clipboardMonitor, &ClipboardMonitor::textChanged,
+            this, &MainWindow::onClipboardTextChanged);
+    connect(clipboardMonitor, &ClipboardMonitor::filesChanged,
+            this, &MainWindow::onClipboardFilesChanged);
+
     connect(tcpClient, &TcpClient::connected, this, &MainWindow::handleConnected);
     connect(tcpClient, &TcpClient::disconnected, this, &MainWindow::handleDisconnected);
     connect(tcpClient, &TcpClient::error, this, &MainWindow::handleError);
+    connect(tcpClient, &TcpClient::authResponse, this, &MainWindow::handleAuthResponse);
     connect(tcpClient, &TcpClient::dataReceived, this, &MainWindow::onDataReceived);
+    connect(tcpClient, &TcpClient::reconnectScheduled, this, &MainWindow::onReconnectScheduled);
+}
+
+void MainWindow::setupAdvancedControls()
+{
+    auto receiveDirectoryLabel = new QLabel(tr("Receive Dir:"), this);
+    receiveDirectoryEdit = new QLineEdit(this);
+    auto receiveDirectoryButton = new QPushButton(tr("Browse"), this);
+    auto receiveDirectoryLayout = new QHBoxLayout();
+    receiveDirectoryLayout->setContentsMargins(0, 0, 0, 0);
+    receiveDirectoryLayout->addWidget(receiveDirectoryEdit);
+    receiveDirectoryLayout->addWidget(receiveDirectoryButton);
+    auto receiveDirectoryContainer = new QWidget(this);
+    receiveDirectoryContainer->setLayout(receiveDirectoryLayout);
+
+    auto tlsLabel = new QLabel(tr("Enable TLS:"), this);
+    tlsCheckBox = new QCheckBox(tr("Use TLS (optional)"), this);
+
+    auto caCertificateLabel = new QLabel(tr("CA Cert:"), this);
+    caCertificateEdit = new QLineEdit(this);
+    auto caCertificateButton = new QPushButton(tr("Browse"), this);
+    auto caCertificateLayout = new QHBoxLayout();
+    caCertificateLayout->setContentsMargins(0, 0, 0, 0);
+    caCertificateLayout->addWidget(caCertificateEdit);
+    caCertificateLayout->addWidget(caCertificateButton);
+    auto caCertificateContainer = new QWidget(this);
+    caCertificateContainer->setLayout(caCertificateLayout);
+
+    ui->gridLayout->addWidget(receiveDirectoryLabel, 4, 0);
+    ui->gridLayout->addWidget(receiveDirectoryContainer, 4, 1);
+    ui->gridLayout->addWidget(tlsLabel, 5, 0);
+    ui->gridLayout->addWidget(tlsCheckBox, 5, 1);
+    ui->gridLayout->addWidget(caCertificateLabel, 6, 0);
+    ui->gridLayout->addWidget(caCertificateContainer, 6, 1);
+    ui->gridLayout->addWidget(ui->btnConnect, 7, 0, 1, 2);
+
+    connect(receiveDirectoryButton, &QPushButton::clicked,
+            this, &MainWindow::onBrowseReceiveDirectory);
+    connect(caCertificateButton, &QPushButton::clicked,
+            this, &MainWindow::onBrowseCaCertificate);
+}
+
+void MainWindow::loadSettings()
+{
+    QSettings settings(kSettingsOrganization, kSettingsApplication);
+    ui->serverAddressEdit->setText(settings.value("connection/host", ui->serverAddressEdit->text()).toString());
+    ui->portEdit->setText(settings.value("connection/port", ui->portEdit->text()).toString());
+    ui->usernameEdit->setText(settings.value("connection/username").toString());
+    tlsCheckBox->setChecked(settings.value("connection/use_tls", false).toBool());
+    caCertificateEdit->setText(settings.value("connection/ca_cert").toString());
+    receiveDirectoryEdit->setText(settings.value("files/receive_dir", defaultReceiveDirectory()).toString());
+}
+
+void MainWindow::saveSettings() const
+{
+    QSettings settings(kSettingsOrganization, kSettingsApplication);
+    settings.setValue("connection/host", ui->serverAddressEdit->text());
+    settings.setValue("connection/port", ui->portEdit->text());
+    settings.setValue("connection/username", ui->usernameEdit->text());
+    settings.setValue("connection/use_tls", tlsCheckBox->isChecked());
+    settings.setValue("connection/ca_cert", caCertificateEdit->text());
+    settings.setValue("files/receive_dir", receiveDirectoryEdit->text());
 }
 
 void MainWindow::onConnectClicked()
 {
-    if (ui->usernameEdit->text().isEmpty() || ui->passwordEdit->text().isEmpty()) {
-        QMessageBox::warning(this, "Error", "Please enter username and password");
+    if (connectionRequested) {
+        connectionRequested = false;
+        clipboardMonitor->stopMonitoring();
+        tcpClient->disconnectFromServer();
+        updateConnectButton();
+        updateStatus(tr("Disconnect requested"));
         return;
     }
 
-    QString host = ui->serverAddressEdit->text();
-    bool ok;
-    quint16 port = ui->portEdit->text().toUShort(&ok);
-    if (!ok || port < 1024 || port > 65535) {
-        QMessageBox::warning(this, "Error", "Please enter a valid port number (1024-65535)");
+    if (ui->usernameEdit->text().isEmpty() || ui->passwordEdit->text().isEmpty()) {
+        QMessageBox::warning(this, tr("Missing Credentials"), tr("Please enter username and password."));
         return;
     }
-    
-    updateStatus("Connecting to server...");
-    tcpClient->connectToServer(host, port);
+
+    bool ok = false;
+    const quint16 port = ui->portEdit->text().toUShort(&ok);
+    if (!ok || port < 1024) {
+        QMessageBox::warning(this, tr("Invalid Port"), tr("Please enter a valid port number."));
+        return;
+    }
+
+    QDir().mkpath(receiveDirectory());
+    saveSettings();
+
+    connectionRequested = true;
+    updateConnectButton();
+    updateStatus(tr("Connecting to server..."));
+
+    tcpClient->connectToServer(
+        ui->serverAddressEdit->text(),
+        port,
+        tlsCheckBox->isChecked(),
+        caCertificateEdit->text(),
+        true
+    );
 }
 
-void MainWindow::onClipboardChanged(const QString &content)
+void MainWindow::onClipboardTextChanged(const QString &content)
 {
-    if (!tcpClient || !tcpClient->isConnected()) {
+    if (!tcpClient->isAuthenticated()) {
         return;
     }
 
-    // Create a JSON object with the specified format
-    QJsonObject clipboardData;
-    clipboardData["content"] = content;  // 先添加content
-    clipboardData["type"] = "clipboard"; // 再添加type
+    QJsonObject message;
+    message["type"] = "clipboard_text";
+    message["content"] = content;
+    tcpClient->sendJson(message);
+    updateStatus(tr("Sent text clipboard update"));
+}
 
-    // Convert to JSON and send
-    QJsonDocument doc(clipboardData);
-    QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
-    tcpClient->sendData(jsonData);
-    qDebug() << "Sent clipboard data:" << jsonData;
+void MainWindow::onClipboardFilesChanged(const QStringList& filePaths)
+{
+    if (!tcpClient->isAuthenticated()) {
+        return;
+    }
+
+    const QJsonObject message = buildFileBundleMessage(filePaths);
+    if (message.isEmpty()) {
+        return;
+    }
+
+    tcpClient->sendJson(message);
+    updateStatus(tr("Sent %1 file(s) from clipboard").arg(filePaths.size()));
 }
 
 void MainWindow::handleConnected()
 {
-    qDebug() << "Connected to server";
-    updateStatus("Connected to server");
-
-    // 发送认证请求
+    updateStatus(tr("Transport connected, sending authentication"));
     QJsonObject authRequest;
     authRequest["type"] = "auth";
     authRequest["username"] = ui->usernameEdit->text();
     authRequest["password"] = ui->passwordEdit->text();
-
-    QJsonDocument doc(authRequest);
-    QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
-    tcpClient->sendData(jsonData);
-    qDebug() << "Sent auth request:" << jsonData;
-
-    ui->btnConnect->setEnabled(false);
+    tcpClient->sendJson(authRequest);
 }
 
 void MainWindow::handleDisconnected()
 {
-    // 断开连接后的处理
-    qDebug() << "Disconnected from server";
-    ui->btnConnect->setEnabled(true);
-    updateStatus("Disconnected from server");
+    clipboardMonitor->stopMonitoring();
+    updateStatus(connectionRequested ? tr("Connection lost") : tr("Disconnected"));
+    updateConnectButton();
 }
 
 void MainWindow::handleError(const QString& error)
 {
-    // 错误处理
-    qDebug() << "Error:" << error;
-    QMessageBox::critical(this, "错误", "发生错误：" + error);
-    updateStatus("Error: " + error);
-}
-
-void MainWindow::onDataReceived(const QByteArray& data)
-{
-    qDebug() << "Received data:" << data;
-    
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        qDebug() << "JSON parse error:" << parseError.errorString();
-        return;
-    }
-
-    if (!doc.isObject()) {
-        qDebug() << "Received data is not a JSON object";
-        return;
-    }
-
-    QJsonObject obj = doc.object();
-    
-    // 检查消息类型
-    if (!obj.contains("type")) {
-        qDebug() << "Received data has no type field";
-        return;
-    }
-
-    QString type = obj["type"].toString();
-    qDebug() << "Received message type:" << type;
-    
-    if (type == "clipboard") {
-        if (!obj.contains("content")) {
-            qDebug() << "Received clipboard data has no content field";
-            return;
-        }
-        QString content = obj["content"].toString();
-        if (!content.isEmpty()) {
-            qDebug() << "Setting clipboard content:" << content;
-            clipboardMonitor->setClipboardContent(content);
-        }
-    }
-    else if (type == "auth_response") {
-        handleAuthResponse(obj);
-    }
+    updateStatus(tr("Network error: %1").arg(error));
 }
 
 void MainWindow::handleAuthResponse(const QJsonObject& response)
 {
-    qDebug() << "Handling auth response:" << QJsonDocument(response).toJson();
-    
-    // 检查响应中的字段
-    if (!response.contains("success")) {
-        qDebug() << "Auth response missing 'success' field";
+    const bool success = response.value("status").toString() == "ok";
+    if (success) {
+        updateStatus(tr("Authenticated successfully"));
+        clipboardMonitor->startMonitoring();
         return;
     }
 
-    bool success = response["success"].toBool();
-    qDebug() << "Auth success value:" << success;
+    connectionRequested = false;
+    clipboardMonitor->stopMonitoring();
+    updateConnectButton();
+    QMessageBox::warning(this, tr("Authentication Failed"),
+                         response.value("message").toString(tr("Unknown error")));
+    tcpClient->disconnectFromServer();
+}
 
-    if (success) {
-        qDebug() << "Authentication successful";
-        updateStatus("Authentication successful");
-        // 认证成功后可以开始剪贴板监控
-        clipboardMonitor->startMonitoring();
-    } else {
-        QString reason;
-        if (response.contains("reason")) {
-            reason = response["reason"].toString();
-        } else if (response.contains("message")) {
-            reason = response["message"].toString();
-        } else {
-            reason = "Unknown error";
-        }
-        
-        qDebug() << "Authentication failed:" << reason;
-        updateStatus("Authentication failed: " + reason);
-        // 认证失败，重新启用连接按钮
-        ui->btnConnect->setEnabled(true);
-        // 断开连接
-        tcpClient->disconnectFromServer();
+void MainWindow::onDataReceived(const QJsonObject& data)
+{
+    const QString type = data.value("type").toString();
+    if (type == "clipboard_text") {
+        clipboardMonitor->setClipboardText(data.value("content").toString());
+        updateStatus(tr("Received text clipboard update"));
+        return;
     }
+
+    if (type == "file_bundle") {
+        saveReceivedFiles(data);
+        return;
+    }
+}
+
+void MainWindow::onBrowseReceiveDirectory()
+{
+    const QString selected = QFileDialog::getExistingDirectory(
+        this,
+        tr("Select Receive Directory"),
+        receiveDirectory()
+    );
+    if (!selected.isEmpty()) {
+        receiveDirectoryEdit->setText(selected);
+        saveSettings();
+    }
+}
+
+void MainWindow::onBrowseCaCertificate()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        tr("Select CA Certificate"),
+        caCertificateEdit->text(),
+        tr("Certificate Files (*.pem *.crt *.cer);;All Files (*)")
+    );
+    if (!selected.isEmpty()) {
+        caCertificateEdit->setText(selected);
+        saveSettings();
+    }
+}
+
+void MainWindow::onReconnectScheduled(int attempt, int delayMs)
+{
+    if (!connectionRequested) {
+        return;
+    }
+
+    updateStatus(tr("Reconnect attempt %1 scheduled in %2 seconds")
+        .arg(attempt)
+        .arg(delayMs / 1000.0, 0, 'f', 1));
 }
 
 void MainWindow::updateStatus(const QString &message)
 {
     ui->statusBar->showMessage(message);
-    ui->logTextEdit->append(message);
+    ui->logTextEdit->append(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss ")) + message);
+}
+
+void MainWindow::updateConnectButton()
+{
+    ui->btnConnect->setText(connectionRequested ? tr("Disconnect") : tr("Connect"));
+}
+
+QString MainWindow::defaultReceiveDirectory() const
+{
+    QString base = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (base.isEmpty()) {
+        base = QDir::homePath();
+    }
+    return QDir(base).filePath(QStringLiteral("RemoteClipboard"));
+}
+
+QString MainWindow::receiveDirectory() const
+{
+    return receiveDirectoryEdit->text().isEmpty()
+        ? defaultReceiveDirectory()
+        : receiveDirectoryEdit->text();
+}
+
+QJsonObject MainWindow::buildFileBundleMessage(const QStringList& filePaths) const
+{
+    QJsonArray files;
+    qint64 totalBytes = 0;
+    QMimeDatabase mimeDatabase;
+
+    for (const QString& filePath : filePaths) {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+
+        const QByteArray fileData = file.readAll();
+        totalBytes += fileData.size();
+        if (totalBytes > kMaxFileBundleBytes) {
+            QMessageBox::warning(const_cast<MainWindow*>(this),
+                                 tr("File Bundle Too Large"),
+                                 tr("Selected clipboard files exceed the 32MB safe transfer limit."));
+            return {};
+        }
+
+        QFileInfo fileInfo(file);
+        QJsonObject fileObject;
+        fileObject["name"] = fileInfo.fileName();
+        fileObject["size"] = static_cast<qint64>(fileData.size());
+        fileObject["mime"] = mimeDatabase.mimeTypeForFile(fileInfo).name();
+        fileObject["sha256"] = QString::fromLatin1(
+            QCryptographicHash::hash(fileData, QCryptographicHash::Sha256).toHex());
+        fileObject["data"] = QString::fromLatin1(fileData.toBase64());
+        files.append(fileObject);
+    }
+
+    if (files.isEmpty()) {
+        return {};
+    }
+
+    QJsonObject message;
+    message["type"] = "file_bundle";
+    message["files"] = files;
+    return message;
+}
+
+void MainWindow::saveReceivedFiles(const QJsonObject& message)
+{
+    const QJsonArray files = message.value("files").toArray();
+    if (files.isEmpty()) {
+        return;
+    }
+
+    const QString sender = sanitizeFileName(message.value("sender").toString(QStringLiteral("peer")));
+    const QString batchName = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-")) + sender;
+    const QDir baseDir(receiveDirectory());
+    QDir().mkpath(baseDir.filePath(batchName));
+
+    int savedCount = 0;
+    for (const QJsonValue& value : files) {
+        const QJsonObject fileObject = value.toObject();
+        const QString fileName = sanitizeFileName(fileObject.value("name").toString(QStringLiteral("clipboard-file")));
+        const QByteArray fileData = QByteArray::fromBase64(fileObject.value("data").toString().toLatin1());
+        if (fileData.isEmpty() && fileObject.value("size").toInt() > 0) {
+            continue;
+        }
+
+        QString targetPath = QDir(baseDir.filePath(batchName)).filePath(fileName);
+        if (QFile::exists(targetPath)) {
+            const QFileInfo info(targetPath);
+            targetPath = info.dir().filePath(info.completeBaseName() + "-" +
+                QDateTime::currentDateTime().toString(QStringLiteral("hhmmss")) +
+                (info.suffix().isEmpty() ? QString() : QStringLiteral(".") + info.suffix()));
+        }
+
+        QFile output(targetPath);
+        if (!output.open(QIODevice::WriteOnly)) {
+            continue;
+        }
+        output.write(fileData);
+        output.close();
+        ++savedCount;
+    }
+
+    updateStatus(tr("Saved %1 file(s) to %2").arg(savedCount).arg(baseDir.filePath(batchName)));
+}
+
+QString MainWindow::sanitizeFileName(const QString& fileName) const
+{
+    QString result = fileName;
+    const QString illegal = QStringLiteral("\\/:*?\"<>|");
+    for (const QChar character : illegal) {
+        result.replace(character, QLatin1Char('_'));
+    }
+    return result;
 }

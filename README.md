@@ -1,107 +1,310 @@
-# Remote Clipboard: 高效跨设备剪贴板同步系统
+# Remote Clipboard
 
-## 项目背景
+Remote Clipboard 是一个轻量级的跨设备剪贴板同步工具，面向日常办公与开发场景，支持在多台设备之间同步文本内容与文件内容。项目当前包含 Linux Wayland GUI 客户端、Linux CLI 客户端、Windows GUI 客户端，以及两个不同消息缓冲上限的原生 C++ 服务端实现。
 
-在现代开发与办公环境中，多设备协作已成为常态。然而，在不同设备间传输临时文本内容往往依赖聊天软件或云笔记，效率低下且操作繁琐。特别是在 Linux 下，Wayland 对剪贴板访问的限制，使得跨设备复制粘贴更具挑战性。
+## 项目目标
 
-在配置 Arch Linux 并使用 Hyprland 桌面环境的过程中，我感受到缺乏高效跨设备剪贴板同步工具的困扰。因此，我决定做一个 Remote Clipboard，一个轻量级、高效、跨平台的实时剪贴板共享解决方案。
+Remote Clipboard 致力于解决多设备协作中的一个高频问题：在不同系统、不同桌面环境之间，快速、稳定地共享临时文本和文件，而不依赖聊天软件、云笔记或重型同步服务。
 
-## 项目概述
+项目设计重点如下：
 
-Remote Clipboard 通过 TCP 网络通信，实现跨设备的剪贴板同步，支持 Windows、Linux（Wayland/CLI）、macOS（CLI）等主流操作系统。其核心目标包括：
+- 低依赖、轻量化，基于直接网络通信完成同步
+- 面向多平台使用场景，提供 GUI 与 CLI 两类客户端
+- 默认开箱即用，TLS 作为可选能力按需启用
+- 在网络波动场景下具备自动重连与心跳保活能力
+- 支持文件落盘与服务端保留策略，便于审计和运维
 
-- **实时同步**：监听剪贴板变化，自动广播到所有连接的设备。
-- **轻量级架构**：无需数据库，采用直接 TCP 传输，避免额外开销。
-- **跨平台兼容**：针对不同系统提供相应的实现方案，确保高可用性。
-- **高安全性**：后续版本将支持 TLS 加密，确保传输数据安全。
+## 核心特性
 
-## 系统架构与技术实现
+- 支持文本剪贴板同步
+- 支持文件剪贴板同步
+- 客户端可配置接收目录，并将收到的文件保存到本地指定路径
+- 服务端可配置接收目录，并支持基于天数的文件保留与自动清理
+- 默认使用明文 TCP，TLS 可选启用
+- 客户端支持心跳检测、断线重连和退避重试
+- 提供 Debian/Ubuntu、Arch、Fedora、openSUSE 安装脚本
 
-### 1. 客户端架构
+## 仓库结构
 
-**Windows 客户端**
+- `RemoteClipboard_Linux_wayland`
+  Linux Wayland GUI 客户端
+- `RemoteclipboardCliForLinux`
+  Linux CLI 客户端
+- `RemoteClipboardWindows`
+  Windows GUI 客户端
+- `RemoteClipboardServer-64MB`
+  适合较小消息负载的服务端版本
+- `RemoteClipboardServer-512MB`
+  适合更大消息负载的服务端版本
+- `server_common`
+  服务端共享传输层与文件处理实现
+- `scripts`
+  Linux 发行版安装脚本
 
-- 使用 Qt（C++）构建 GUI，提高用户体验。
-- 通过 Win32 API 监听剪贴板事件。
-- 采用 Winsock 实现 TCP 数据传输。
+## 协议与传输
 
-**Linux 客户端**
+当前实现使用“每行一条 JSON”的分帧协议。主要消息类型包括：
 
-- 采用 Qt 实现 GUI 版本，提供良好交互体验。
-- 通过 `wl-clipboard` 监听 Wayland 剪贴板，兼容 CLI 场景。
-- 使用标准 socket 实现 TCP 通信。
-- 提供了命令行版本，提高可用性。
+- `auth`
+- `auth_response`
+- `clipboard_text`
+- `file_bundle`
+- `ping`
+- `pong`
 
-**macOS 客户端**
+其中：
 
-- 采用 C++，并通过 Objective-C 与 NSPasteboard 交互。
-- 采用标准 socket 进行数据传输。
+- 文本内容通过 `clipboard_text` 传输
+- 文件内容通过 `file_bundle` 传输
+- 文件数据编码在 `file_bundle.files[*].data` 字段中，采用 Base64 表示
 
-### 2. 服务器端架构
+为了兼容 `64MB` 服务端版本，客户端当前将单次文件批量传输限制在 32MB 以内。这是一个有意保留的安全边界，用于避免在异常场景下造成过高的内存占用。
 
-服务器采用原生 C++ 开发，负责接收和广播剪贴板数据。其主要功能包括：
+## TLS 设计
 
-- 处理客户端连接管理。
-- 转发剪贴板数据至所有在线设备。
-- 可选身份认证机制（用户名/密码）。
+TLS 为可选能力，客户端与服务端默认均关闭 TLS，以降低首次部署门槛。需要加密传输时，可由用户手动启用。
 
-## 使用方法
-
-### 客户端编译
-
-#### Windows:
-
-```bash
-mkdir build
-cd build
-C:\path\to\your\qt\bin\cmake.exe .. -G "MinGW Makefiles"
-mingw32-make
-powershell -ExecutionPolicy Bypass -File deploy.ps1
-.\build\dmo.exe
-```
-
-#### Linux/macOS:
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
-```
-
-### 服务器端编译
-
-安装依赖（示例）：
+### 服务端启用 TLS
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install nlohmann-json3-dev
-
-# Arch Linux
-sudo pacman -S nlohmann-json
+./RemoteClipboardServer \
+  --tls \
+  --tls-cert /path/to/server.crt \
+  --tls-key /path/to/server.key
 ```
 
-构建并运行：
+### 客户端启用 TLS
+
+- GUI 客户端：勾选 `Use TLS (optional)`
+- CLI 客户端：增加 `--tls`
+
+### 证书校验说明
+
+为兼顾易用性与部署成本，当前 GUI 和 CLI 客户端在启用 TLS 后默认允许较宽松的证书校验策略，适合内网、自签名证书和快速试运行场景。若需要严格校验服务端证书，请显式提供 CA 文件：
+
+- GUI 客户端：填写 `CA Cert`
+- CLI 客户端：使用 `--tls-ca /path/to/ca.pem --strict-tls`
+
+### 自签名证书示例
 
 ```bash
-mkdir build
-cd build
-cmake ..
-make
-./server -p <port> [-u <user> -w <password>]
+openssl req -x509 -nodes -newkey rsa:2048 \
+  -keyout server.key \
+  -out server.crt \
+  -days 365
 ```
 
-## 未来优化方向
+## 文件接收与保留策略
 
-1. **安全性增强**
-   - 引入 TLS 加密，防止中间人攻击和数据窃取。
-2. **自动重连机制**
-   - 解决网络波动导致的连接断开问题，提升稳定性。
-3. **更广泛的跨平台支持**
-   - 增强对 Android 和 iOS 设备的兼容性。
-4. **文件内容的支持**
-   - 增加对粘贴板上的文件内容支持，增强功能。
+### 客户端
 
-## 结语
+客户端收到文件后，会将其写入用户指定目录。
 
-Remote Clipboard 以轻量级、高效、跨平台的特性，解决了多设备间临时数据传输的痛点。未来，该项目将不断优化，朝着更安全、更智能的方向发展，助力高效开发与办公环境。
+- Linux GUI / Windows GUI：通过界面中的 `Receive Dir` 设置，配置会持久化保存
+- Linux CLI：通过 `--receive-dir /path/to/dir` 指定
+
+### 服务端
+
+服务端同样会保存收到的文件，并支持保留周期控制：
+
+- `--storage-dir /path/to/dir`
+  指定服务端文件保存目录
+- `--retention-days N`
+  指定文件保留天数
+
+服务端接收到文件后会执行以下流程：
+
+1. 将文件保存到服务端本地目录。
+2. 将消息广播给其他已认证客户端。
+3. 清理超过保留天数的历史文件。
+
+## 断线重连机制
+
+客户端针对以下情况实现了自动恢复能力：
+
+- 短时网络抖动
+- 服务端重启
+- 心跳超时
+- TLS 连接中断
+
+重连采用递增退避策略，以避免在服务端故障或网络不稳定时产生持续高频连接请求。
+
+## 快速开始
+
+### 1. 启动服务端
+
+明文模式示例：
+
+```bash
+./RemoteClipboardServer \
+  --port 8080 \
+  --username admin \
+  --password admin \
+  --storage-dir ./server-files \
+  --retention-days 7
+```
+
+TLS 模式示例：
+
+```bash
+./RemoteClipboardServer \
+  --port 8080 \
+  --username admin \
+  --password admin \
+  --storage-dir ./server-files \
+  --retention-days 7 \
+  --tls \
+  --tls-cert ./server.crt \
+  --tls-key ./server.key
+```
+
+### 2. 启动 Linux CLI 客户端
+
+```bash
+./clipboard_sync \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --username admin \
+  --password admin \
+  --receive-dir ~/Downloads/RemoteClipboard
+```
+
+启用 TLS：
+
+```bash
+./clipboard_sync \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --username admin \
+  --password admin \
+  --receive-dir ~/Downloads/RemoteClipboard \
+  --tls
+```
+
+### 3. 启动 GUI 客户端
+
+GUI 客户端启动后，填写以下信息即可连接：
+
+- 服务端地址
+- 端口
+- 用户名与密码
+- 接收目录
+- TLS 相关选项（可选）
+
+认证成功后，客户端会开始监听本地剪贴板，并自动同步文本或文件内容。
+
+## 构建指南
+
+### Linux GUI 客户端
+
+依赖示例：
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install qt6-base-dev qt6-tools-dev-tools wl-clipboard
+```
+
+构建：
+
+```bash
+cmake -S RemoteClipboard_Linux_wayland -B build/linux-gui
+cmake --build build/linux-gui -j
+```
+
+### Linux CLI 客户端
+
+依赖示例：
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install cmake nlohmann-json3-dev libssl-dev wl-clipboard
+```
+
+构建：
+
+```bash
+cmake -S RemoteclipboardCliForLinux -B build/linux-cli
+cmake --build build/linux-cli -j
+```
+
+### 服务端
+
+依赖示例：
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install cmake nlohmann-json3-dev libssl-dev
+```
+
+构建 `64MB` 版本：
+
+```bash
+cmake -S RemoteClipboardServer-64MB -B build/server-64
+cmake --build build/server-64 -j
+```
+
+构建 `512MB` 版本：
+
+```bash
+cmake -S RemoteClipboardServer-512MB -B build/server-512
+cmake --build build/server-512 -j
+```
+
+## Linux 安装脚本
+
+项目提供了按发行版划分的安装脚本，以及一个自动识别入口脚本：
+
+- `scripts/install-linux.sh`
+- `scripts/install-debian.sh`
+- `scripts/install-arch.sh`
+- `scripts/install-fedora.sh`
+- `scripts/install-opensuse.sh`
+
+自动识别发行版并安装：
+
+```bash
+./scripts/install-linux.sh
+```
+
+也可以直接执行对应发行版脚本，例如：
+
+```bash
+./scripts/install-debian.sh
+```
+
+安装完成后，二进制文件会被放置到 `/usr/local/bin`：
+
+- `remote-clipboard-server-64mb`
+- `remote-clipboard-server-512mb`
+- `remote-clipboard-cli`
+- `remote-clipboard-gui`
+
+## 运行建议
+
+- 内网快速部署场景可以直接使用默认明文模式
+- 对传输安全有要求时，建议启用 TLS，并为客户端配置 CA 校验
+- 若主要同步文本内容，可优先使用 `64MB` 服务端
+- 若存在更大的文件传输需求，可使用 `512MB` 服务端
+- 若需要长期运行，建议将服务端纳入 systemd 或其他进程管理工具
+
+## 当前状态与验证范围
+
+目前已在本地完成以下模块的构建验证：
+
+- `RemoteClipboardServer-64MB`
+- `RemoteClipboardServer-512MB`
+- `RemoteclipboardCliForLinux`
+- `RemoteClipboard_Linux_wayland`
+
+Windows GUI 代码已经同步到当前协议与功能模型，但在当前开发环境下未完成本机构建验证。因此，README 当前主要提供 Linux 侧的构建与运行说明。
+
+## 后续可继续完善的方向
+
+- 更细粒度的权限与访问控制
+- 更完善的文件类型与大文件传输策略
+- 更清晰的客户端状态提示与日志输出
+- 更完整的 Windows 与 macOS 构建和发行说明
+
+## License
+
+当前仓库尚未声明许可证。如计划公开分发或接受外部贡献，建议补充明确的开源许可证文件。

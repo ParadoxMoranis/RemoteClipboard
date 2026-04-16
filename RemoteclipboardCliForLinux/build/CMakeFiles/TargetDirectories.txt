@@ -1,0 +1,3 @@
+/home/Moranis/Projects/RemoteClipboard/RemoteclipboardCliForLinux/build/CMakeFiles/clipboard_sync.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteclipboardCliForLinux/build/CMakeFiles/edit_cache.dir
+/home/Moranis/Projects/RemoteClipboard/RemoteclipboardCliForLinux/build/CMakeFiles/rebuild_cache.dir

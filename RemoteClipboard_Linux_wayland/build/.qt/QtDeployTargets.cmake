@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_RemotePostboard_FILE /home/Moranis/Projects/RemoteClipboard/RemoteClipboard_Linux_wayland/build/RemotePostboard)
+set(__QT_DEPLOY_TARGET_RemotePostboard_TYPE EXECUTABLE)

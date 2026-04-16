@@ -10,9 +10,6 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 添加 Qt 包含路径
-set(CMAKE_PREFIX_PATH "C:/Qt/6.8.1/mingw_64") # 根据你的 Qt 安装路径修改
-
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS 
     Widgets
     Network
