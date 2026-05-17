@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -9,6 +10,8 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include "filetransfer.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -49,6 +52,7 @@ private:
         std::string username;
         std::string buffer;
         std::mutex writeMutex;
+        std::map<std::string, filetransfer::IncomingTransferState> incomingTransfers;
     };
 
     void initializeTls();
@@ -72,10 +76,12 @@ private:
 
     bool ensureStorageDir();
     void cleanupExpiredFiles();
-    std::string sanitizeFileName(const std::string& fileName) const;
-    bool decodeBase64(const std::string& input, std::vector<unsigned char>& output) const;
-    std::string sha256Hex(const std::vector<unsigned char>& data) const;
     void persistFiles(const std::shared_ptr<ClientConnection>& client, const json& message);
+    void handleChunkTransfer(const std::shared_ptr<ClientConnection>& client, const json& message);
+    void handleChunkTransferStart(const std::shared_ptr<ClientConnection>& client, const json& message);
+    void handleChunkTransferChunk(const std::shared_ptr<ClientConnection>& client, const json& message);
+    void handleChunkTransferComplete(const std::shared_ptr<ClientConnection>& client, const json& message);
+    void cleanupClientTransfers(const std::shared_ptr<ClientConnection>& client);
 
     const std::size_t maxMessageBytes_;
     SocketType serverSocket_ = INVALID_SOCKET_VALUE;

@@ -1,4 +1,5 @@
 #include "../server_common/tcpserver.h"
+#include "../server_common/serverconfig.h"
 
 #include <csignal>
 #include <iostream>
@@ -16,6 +17,7 @@ void signalHandler(int signum)
 }
 
 struct ServerConfig {
+    std::string configName = "server-512mb";
     uint16_t port = 8080;
     std::string username = "admin";
     std::string password = "admin";
@@ -37,7 +39,8 @@ void printHelp()
         << "  -u, --username <username>   Username for authentication (default: admin)\n"
         << "  -w, --password <password>   Password for authentication (default: admin)\n"
         << "  -d, --storage-dir <path>    Directory for received files (default: received_files)\n"
-        << "  -r, --retention-days <n>    Retain server-side files for n days (default: 7)\n"
+        << "  -r, --retention-days <n>    Retain server-side files for n days, -1 means unlimited (default: 7)\n"
+        << "      --config-name <name>    Config namespace under ~/.config/RemoteClipboard\n"
         << "      --tls                   Enable TLS for client connections\n"
         << "      --tls-cert <path>       PEM certificate file for TLS mode\n"
         << "      --tls-key <path>        PEM private key file for TLS mode\n";
@@ -46,6 +49,16 @@ void printHelp()
 ServerConfig parseCommandLine(int argc, char* argv[])
 {
     ServerConfig config;
+    ServerConfigStore store(config.configName);
+    const ServerAppConfig stored = store.load();
+    config.port = stored.port;
+    config.username = stored.username;
+    config.password = stored.password;
+    config.storageDir = stored.storageDir;
+    config.retentionDays = stored.retentionDays;
+    config.tlsEnabled = stored.tlsEnabled;
+    config.tlsCertificateFile = stored.tlsCertificateFile;
+    config.tlsKeyFile = stored.tlsKeyFile;
 
     for (int index = 1; index < argc; ++index) {
         const std::string arg = argv[index];
@@ -73,6 +86,10 @@ ServerConfig parseCommandLine(int argc, char* argv[])
             config.retentionDays = std::stoi(argv[++index]);
             continue;
         }
+        if (arg == "--config-name" && index + 1 < argc) {
+            config.configName = argv[++index];
+            continue;
+        }
         if (arg == "--tls") {
             config.tlsEnabled = true;
             continue;
@@ -97,6 +114,18 @@ int main(int argc, char* argv[])
     signal(SIGTERM, signalHandler);
 
     const auto config = parseCommandLine(argc, argv);
+    ServerConfigStore store(config.configName);
+    std::string saveError;
+    store.save(ServerAppConfig{
+        config.port,
+        config.username,
+        config.password,
+        config.storageDir,
+        config.retentionDays,
+        config.tlsEnabled,
+        config.tlsCertificateFile,
+        config.tlsKeyFile
+    }, &saveError);
 
     try {
         TcpServer server(512ull * 1024ull * 1024ull);
@@ -112,8 +141,11 @@ int main(int argc, char* argv[])
         std::cout << "Username: " << config.username << std::endl;
         std::cout << "Password: " << config.password << std::endl;
         std::cout << "Storage directory: " << config.storageDir << std::endl;
-        std::cout << "Retention days: " << config.retentionDays << std::endl;
+        std::cout << "Retention days: "
+                  << (config.retentionDays < 0 ? std::string("unlimited") : std::to_string(config.retentionDays))
+                  << std::endl;
         std::cout << "TLS: " << (config.tlsEnabled ? "enabled" : "disabled") << std::endl;
+        std::cout << "Config file: " << store.configPath() << std::endl;
 
         while (g_running) {
             server.processEvents();

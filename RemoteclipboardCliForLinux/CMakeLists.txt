@@ -7,7 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(nlohmann_json 3.2.0 REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-add_executable(clipboard_sync clipboard_sync.cpp)
+add_executable(clipboard_sync
+    clipboard_sync.cpp
+    ../cli_common/config.cpp
+    ../server_common/filetransfer.cpp
+)
 target_link_libraries(clipboard_sync PRIVATE
     nlohmann_json::nlohmann_json
     OpenSSL::SSL

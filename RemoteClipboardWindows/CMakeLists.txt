@@ -39,6 +39,12 @@ set(PROJECT_SOURCES
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    ../gui_common/clientconfig.cpp
+    ../gui_common/clientconfig.h
+    ../gui_common/settingsdialog.cpp
+    ../gui_common/settingsdialog.h
+    ../gui_common/autostartmanager.cpp
+    ../gui_common/autostartmanager.h
     clipboardmonitor.h
     clipboardmonitor.cpp
     tcpclient.h

@@ -11,6 +11,8 @@ find_package(OpenSSL REQUIRED)
 add_executable(${PROJECT_NAME}
     server_main.cpp
     ../server_common/tcpserver.cpp
+    ../server_common/filetransfer.cpp
+    ../server_common/serverconfig.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

@@ -3,8 +3,13 @@
 
 #include <QJsonObject>
 #include <QMainWindow>
+#include <QMap>
+#include <QShortcut>
+#include <QSystemTrayIcon>
 
 #include "tcpclient.h"
+#include "../gui_common/clientconfig.h"
+#include "../gui_common/autostartmanager.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -12,15 +17,20 @@ QT_END_NAMESPACE
 
 class ClipboardMonitor;
 class QCheckBox;
+class QComboBox;
+class QFile;
 class QLineEdit;
+class QPushButton;
+class QCloseEvent;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(bool autoStartMode = false, QWidget *parent = nullptr);
     ~MainWindow();
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onConnectClicked();
@@ -34,19 +44,52 @@ private slots:
     void onBrowseReceiveDirectory();
     void onBrowseCaCertificate();
     void onReconnectScheduled(int attempt, int delayMs);
+    void onOpenSettings();
+    void onProfileChanged(int index);
+    void showMainWindow();
+    void hideToTray();
+    void switchToNextProfile();
+    void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
 
 private:
+    struct IncomingChunkTransfer {
+        QString transferId;
+        QString sender;
+        QString fileName;
+        QString sha256;
+        QString mimeType;
+        qint64 expectedSize = 0;
+        qint64 writtenBytes = 0;
+        QString targetPath;
+        QFile* output = nullptr;
+    };
+
     void setupConnections();
     void setupAdvancedControls();
+    void setupTray();
+    void setupShortcuts();
     void loadSettings();
-    void saveSettings() const;
+    void saveSettings();
+    void applyConfigToUi();
+    void syncProfileFromUi();
+    void selectProfileById(const QString& profileId);
+    ConnectionProfile* currentProfile();
+    const ConnectionProfile* currentProfile() const;
+    void updateProfileSelector();
+    void applyAutoStart();
     void updateStatus(const QString &message);
     void updateConnectButton();
     QString defaultReceiveDirectory() const;
     QString receiveDirectory() const;
+    bool ensureReceiveDirectoryReady();
+    bool ensureDirectoryExists(const QString& path, bool interactive, QString* resolvedPath = nullptr);
     QJsonObject buildFileBundleMessage(const QStringList& filePaths) const;
     void saveReceivedFiles(const QJsonObject& message);
+    bool sendChunkedFiles(const QStringList& filePaths);
+    void handleChunkTransferMessage(const QJsonObject& data);
+    void finalizeIncomingTransfer(const QString& transferId, bool success, const QString& reason = QString());
     QString sanitizeFileName(const QString& fileName) const;
+    void performAutoConnectIfNeeded();
 
     Ui::MainWindow *ui;
     ClipboardMonitor *clipboardMonitor;
@@ -54,6 +97,18 @@ private:
     QCheckBox* tlsCheckBox;
     QLineEdit* caCertificateEdit;
     QLineEdit* receiveDirectoryEdit;
+    QPushButton* settingsButton;
+    QPushButton* hideButton;
+    QComboBox* profileComboBox;
+    QSystemTrayIcon* trayIcon;
+    QShortcut* showWindowShortcut;
+    QShortcut* switchProfileShortcut;
+    GuiConfigStore configStore;
+    AutoStartManager autoStartManager;
+    GuiAppConfig appConfig;
+    QMap<QString, IncomingChunkTransfer> incomingTransfers;
+    bool autoStartMode = false;
+    bool suppressProfileChangeSignal = false;
     bool connectionRequested = false;
 };
 

@@ -1,7 +1,8 @@
-#include <algorithm>
-#include <atomic>
+#include "../cli_common/config.h"
+#include "../server_common/filetransfer.h"
+
 #include <array>
-#include <cctype>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -9,8 +10,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
+#include <map>
+#include <netdb.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -18,11 +20,7 @@
 #include <vector>
 
 #include <arpa/inet.h>
-#include <fcntl.h>
-#include <netdb.h>
 #include <openssl/err.h>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <openssl/ssl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -32,7 +30,6 @@
 using json = nlohmann::json;
 
 namespace {
-constexpr std::size_t kMaxFileBundleBytes = 32ull * 1024ull * 1024ull;
 constexpr auto kClipboardPollInterval = std::chrono::milliseconds(500);
 constexpr auto kHeartbeatInterval = std::chrono::seconds(10);
 constexpr auto kHeartbeatTimeout = std::chrono::seconds(30);
@@ -45,17 +42,6 @@ void signalHandler(int signum)
         g_running = false;
     }
 }
-
-struct AppConfig {
-    std::string host = "127.0.0.1";
-    uint16_t port = 8080;
-    std::string username = "admin";
-    std::string password = "admin";
-    std::string receiveDir = "received_files";
-    bool tlsEnabled = false;
-    std::string tlsCaFile;
-    bool allowInsecureTls = true;
-};
 
 std::string trim(const std::string& value)
 {
@@ -142,87 +128,15 @@ bool writeClipboardText(const std::string& content)
     return ok;
 }
 
-std::string sanitizeFileName(const std::string& fileName)
-{
-    std::string sanitized = fileName.empty() ? "clipboard-file" : fileName;
-    for (char& ch : sanitized) {
-        if (ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' ||
-            ch == '"' || ch == '<' || ch == '>' || ch == '|') {
-            ch = '_';
-        }
-    }
-    return sanitized;
-}
+struct ClipboardOutgoingMessage {
+    json message;
+    bool chunked = false;
+    std::vector<std::filesystem::path> paths;
+};
 
-std::string currentTimestamp()
-{
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t raw = std::chrono::system_clock::to_time_t(now);
-    std::tm tm {};
-    localtime_r(&raw, &tm);
-
-    std::ostringstream stream;
-    stream << std::put_time(&tm, "%Y%m%d-%H%M%S");
-    return stream.str();
-}
-
-bool decodeBase64(const std::string& input, std::vector<unsigned char>& output)
-{
-    std::string compact;
-    compact.reserve(input.size());
-    for (const char ch : input) {
-        if (!std::isspace(static_cast<unsigned char>(ch))) {
-            compact.push_back(ch);
-        }
-    }
-
-    output.assign((compact.size() * 3) / 4 + 4, 0);
-    const int decodedLength = EVP_DecodeBlock(output.data(),
-        reinterpret_cast<const unsigned char*>(compact.data()),
-        static_cast<int>(compact.size()));
-    if (decodedLength < 0) {
-        output.clear();
-        return false;
-    }
-
-    std::size_t actualLength = static_cast<std::size_t>(decodedLength);
-    if (!compact.empty() && compact.back() == '=') {
-        --actualLength;
-    }
-    if (compact.size() > 1 && compact[compact.size() - 2] == '=') {
-        --actualLength;
-    }
-    output.resize(actualLength);
-    return true;
-}
-
-std::string encodeBase64(const std::vector<unsigned char>& input)
-{
-    if (input.empty()) {
-        return {};
-    }
-
-    std::string output(((input.size() + 2) / 3) * 4, '\0');
-    const int encodedLength = EVP_EncodeBlock(
-        reinterpret_cast<unsigned char*>(output.data()),
-        input.data(),
-        static_cast<int>(input.size()));
-    output.resize(static_cast<std::size_t>(encodedLength));
-    return output;
-}
-
-std::string sha256Hex(const std::vector<unsigned char>& data)
-{
-    unsigned char digest[SHA256_DIGEST_LENGTH] = {0};
-    SHA256(data.data(), data.size(), digest);
-
-    std::ostringstream stream;
-    stream << std::hex << std::setfill('0');
-    for (const unsigned char byte : digest) {
-        stream << std::setw(2) << static_cast<int>(byte);
-    }
-    return stream.str();
-}
+struct ClipboardState {
+    std::string signature;
+};
 
 void printHelp()
 {
@@ -241,9 +155,9 @@ void printHelp()
         << "  -h, --help                Show this help message\n";
 }
 
-AppConfig parseArgs(int argc, char* argv[])
+CliAppConfig parseArgs(int argc, char* argv[])
 {
-    AppConfig config;
+    CliAppConfig config;
 
     for (int index = 1; index < argc; ++index) {
         const std::string arg = argv[index];
@@ -288,17 +202,13 @@ AppConfig parseArgs(int argc, char* argv[])
     return config;
 }
 
-struct ClipboardState {
-    std::string signature;
-};
-
-std::optional<json> pollClipboard(ClipboardState& state)
+std::optional<ClipboardOutgoingMessage> pollClipboard(ClipboardState& state)
 {
     const std::string mimeTypes = runCommand("wl-paste --list-types 2>/dev/null");
     if (mimeTypes.find("text/uri-list") != std::string::npos) {
         const std::string uriPayload = runCommand("wl-paste --type text/uri-list --no-newline 2>/dev/null");
         const auto uriLines = splitLines(uriPayload);
-        std::vector<std::string> paths;
+        std::vector<std::filesystem::path> paths;
         std::size_t totalBytes = 0;
         json files = json::array();
 
@@ -308,43 +218,46 @@ std::optional<json> pollClipboard(ClipboardState& state)
                 continue;
             }
 
-            std::ifstream stream(filePath, std::ios::binary);
-            if (!stream) {
-                continue;
+            const auto path = std::filesystem::path(filePath);
+            const std::size_t fileSize = static_cast<std::size_t>(std::filesystem::file_size(path));
+            totalBytes += fileSize;
+            paths.push_back(path);
+
+            if (totalBytes <= filetransfer::kChunkTransferThresholdBytes) {
+                std::ifstream stream(path, std::ios::binary);
+                if (!stream) {
+                    continue;
+                }
+                std::vector<unsigned char> data(
+                    (std::istreambuf_iterator<char>(stream)),
+                    std::istreambuf_iterator<char>());
+
+                json fileObject;
+                fileObject["name"] = path.filename().string();
+                fileObject["size"] = data.size();
+                fileObject["sha256"] = filetransfer::sha256Hex(data);
+                fileObject["data"] = filetransfer::encodeBase64(data);
+                files.push_back(fileObject);
             }
-
-            std::vector<unsigned char> data(
-                (std::istreambuf_iterator<char>(stream)),
-                std::istreambuf_iterator<char>());
-
-            totalBytes += data.size();
-            if (totalBytes > kMaxFileBundleBytes) {
-                std::cerr << "Clipboard file bundle exceeds 32MB limit, skipping transfer" << std::endl;
-                return std::nullopt;
-            }
-
-            json fileObject;
-            fileObject["name"] = std::filesystem::path(filePath).filename().string();
-            fileObject["size"] = data.size();
-            fileObject["sha256"] = sha256Hex(data);
-            fileObject["data"] = encodeBase64(data);
-            files.push_back(fileObject);
-            paths.push_back(filePath);
         }
 
         if (!paths.empty()) {
             std::ostringstream signature;
             signature << "files:";
             for (const auto& path : paths) {
-                signature << path << "|";
+                signature << path.string() << "|";
             }
 
             if (signature.str() != state.signature) {
                 state.signature = signature.str();
-                return json{
-                    {"type", "file_bundle"},
-                    {"files", files}
-                };
+                if (totalBytes <= filetransfer::kChunkTransferThresholdBytes) {
+                    return ClipboardOutgoingMessage{
+                        json{{"type", "file_bundle"}, {"files", files}},
+                        false,
+                        paths
+                    };
+                }
+                return ClipboardOutgoingMessage{json{}, true, paths};
             }
             return std::nullopt;
         }
@@ -354,18 +267,30 @@ std::optional<json> pollClipboard(ClipboardState& state)
     const std::string signature = "text:" + text;
     if (signature != state.signature) {
         state.signature = signature;
-        return json{
-            {"type", "clipboard_text"},
-            {"content", text}
+        return ClipboardOutgoingMessage{
+            json{{"type", "clipboard_text"}, {"content", text}},
+            false,
+            {}
         };
     }
 
     return std::nullopt;
 }
 
+struct IncomingTransfer {
+    std::string transferId;
+    std::string sender;
+    std::string fileName;
+    std::string sha256;
+    std::filesystem::path targetPath;
+    std::ofstream output;
+    std::size_t expectedSize = 0;
+    std::size_t receivedSize = 0;
+};
+
 class ClientConnection {
 public:
-    explicit ClientConnection(AppConfig config)
+    explicit ClientConnection(CliAppConfig config)
         : config_(std::move(config))
     {
     }
@@ -424,11 +349,9 @@ public:
                 }
             }
 
-            if (config_.allowInsecureTls) {
-                SSL_CTX_set_verify(context_, SSL_VERIFY_NONE, nullptr);
-            } else {
-                SSL_CTX_set_verify(context_, SSL_VERIFY_PEER, nullptr);
-            }
+            SSL_CTX_set_verify(context_,
+                config_.allowInsecureTls ? SSL_VERIFY_NONE : SSL_VERIFY_PEER,
+                nullptr);
 
             ssl_ = SSL_new(context_);
             SSL_set_fd(ssl_, socket_);
@@ -453,6 +376,14 @@ public:
 
     void close()
     {
+        for (auto& [transferId, transfer] : incomingTransfers_) {
+            transfer.output.close();
+            if (!transfer.targetPath.empty()) {
+                std::filesystem::remove(transfer.targetPath);
+            }
+        }
+        incomingTransfers_.clear();
+
         if (ssl_ != nullptr) {
             SSL_shutdown(ssl_);
             SSL_free(ssl_);
@@ -489,6 +420,63 @@ public:
     bool sendJson(const json& message)
     {
         return writeAll(message.dump() + "\n");
+    }
+
+    bool sendChunkedFiles(const std::vector<std::filesystem::path>& paths)
+    {
+        for (const auto& path : paths) {
+            std::ifstream input(path, std::ios::binary);
+            if (!input) {
+                std::cerr << "Failed to read file for transfer: " << path << std::endl;
+                continue;
+            }
+
+            const std::string transferId = std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count())
+                + "-" + path.filename().string();
+
+            json start = {
+                {"type", "file_transfer_start"},
+                {"transfer_id", transferId},
+                {"name", path.filename().string()},
+                {"size", static_cast<std::uint64_t>(std::filesystem::file_size(path))},
+                {"sha256", filetransfer::sha256HexForFile(path)}
+            };
+            if (!sendJson(start)) {
+                return false;
+            }
+
+            std::vector<unsigned char> buffer(filetransfer::kChunkSizeBytes);
+            int sequence = 0;
+            while (input) {
+                input.read(reinterpret_cast<char*>(buffer.data()),
+                    static_cast<std::streamsize>(buffer.size()));
+                const auto count = input.gcount();
+                if (count <= 0) {
+                    break;
+                }
+                std::vector<unsigned char> chunk(buffer.begin(), buffer.begin() + count);
+                json chunkMessage = {
+                    {"type", "file_transfer_chunk"},
+                    {"transfer_id", transferId},
+                    {"seq", sequence++},
+                    {"data", filetransfer::encodeBase64(chunk)}
+                };
+                if (!sendJson(chunkMessage)) {
+                    return false;
+                }
+            }
+
+            if (!sendJson(json{
+                    {"type", "file_transfer_complete"},
+                    {"transfer_id", transferId},
+                    {"chunk_size", static_cast<std::uint64_t>(filetransfer::kChunkSizeBytes)}
+                })) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     std::vector<json> pollIncomingMessages()
@@ -586,6 +574,111 @@ public:
         return true;
     }
 
+    void saveLegacyFiles(const json& message)
+    {
+        if (!message.contains("files") || !message["files"].is_array()) {
+            return;
+        }
+
+        std::filesystem::create_directories(config_.receiveDir);
+        const auto batchDir = std::filesystem::path(config_.receiveDir) /
+            (filetransfer::currentTimestamp() + "-"
+                + filetransfer::sanitizeFileName(message.value("sender", "peer")));
+        std::filesystem::create_directories(batchDir);
+
+        std::size_t savedCount = 0;
+        for (const auto& item : message["files"]) {
+            std::vector<unsigned char> decoded;
+            if (!filetransfer::decodeBase64(item.value("data", ""), decoded)) {
+                continue;
+            }
+
+            auto targetPath = batchDir / filetransfer::sanitizeFileName(item.value("name", "clipboard-file"));
+            if (std::filesystem::exists(targetPath)) {
+                targetPath = batchDir / (targetPath.stem().string() + "-" + filetransfer::currentTimestamp() + targetPath.extension().string());
+            }
+
+            std::ofstream stream(targetPath, std::ios::binary);
+            stream.write(reinterpret_cast<const char*>(decoded.data()), static_cast<std::streamsize>(decoded.size()));
+            ++savedCount;
+        }
+
+        std::cout << "Saved " << savedCount << " file(s) to " << batchDir << std::endl;
+    }
+
+    void handleChunkTransfer(const json& message)
+    {
+        const std::string type = message.value("type", "");
+        const std::string transferId = message.value("transfer_id", "");
+        if (transferId.empty()) {
+            return;
+        }
+
+        if (type == "file_transfer_start") {
+            std::filesystem::create_directories(config_.receiveDir);
+            const auto batchDir = std::filesystem::path(config_.receiveDir) /
+                (filetransfer::currentTimestamp() + "-"
+                    + filetransfer::sanitizeFileName(message.value("sender", "peer")));
+            std::filesystem::create_directories(batchDir);
+
+            IncomingTransfer transfer;
+            transfer.transferId = transferId;
+            transfer.sender = message.value("sender", "peer");
+            transfer.fileName = filetransfer::sanitizeFileName(message.value("name", "clipboard-file"));
+            transfer.sha256 = message.value("sha256", "");
+            transfer.expectedSize = static_cast<std::size_t>(message.value("size", 0));
+            transfer.targetPath = filetransfer::makeFilePathUnique(batchDir / transfer.fileName);
+            transfer.output.open(transfer.targetPath, std::ios::binary);
+            if (!transfer.output) {
+                std::cerr << "Failed to open incoming transfer target: " << transfer.targetPath << std::endl;
+                return;
+            }
+            incomingTransfers_[transferId] = std::move(transfer);
+            std::cout << "Receiving file: " << message.value("name", "clipboard-file") << std::endl;
+            return;
+        }
+
+        auto it = incomingTransfers_.find(transferId);
+        if (it == incomingTransfers_.end()) {
+            return;
+        }
+
+        if (type == "file_transfer_chunk") {
+            std::vector<unsigned char> decoded;
+            if (!filetransfer::decodeBase64(message.value("data", ""), decoded)) {
+                return;
+            }
+            it->second.output.write(reinterpret_cast<const char*>(decoded.data()),
+                static_cast<std::streamsize>(decoded.size()));
+            it->second.receivedSize += decoded.size();
+            return;
+        }
+
+        if (type == "file_transfer_complete") {
+            it->second.output.close();
+
+            if (it->second.expectedSize > 0 && it->second.receivedSize != it->second.expectedSize) {
+                std::filesystem::remove(it->second.targetPath);
+                std::cerr << "Discarded received file because size mismatched: " << it->second.targetPath << std::endl;
+                incomingTransfers_.erase(it);
+                return;
+            }
+
+            if (!it->second.sha256.empty()) {
+                const std::string actualHash = filetransfer::sha256HexForFile(it->second.targetPath);
+                if (actualHash != it->second.sha256) {
+                    std::filesystem::remove(it->second.targetPath);
+                    std::cerr << "Discarded received file because hash mismatched: " << it->second.targetPath << std::endl;
+                    incomingTransfers_.erase(it);
+                    return;
+                }
+            }
+
+            std::cout << "Saved chunked file to " << it->second.targetPath << std::endl;
+            incomingTransfers_.erase(it);
+        }
+    }
+
 private:
     bool writeAll(const std::string& payload)
     {
@@ -605,7 +698,7 @@ private:
         return true;
     }
 
-    AppConfig config_;
+    CliAppConfig config_;
     int socket_ = -1;
     SSL_CTX* context_ = nullptr;
     SSL* ssl_ = nullptr;
@@ -613,38 +706,53 @@ private:
     bool awaitingPong_ = false;
     bool authenticationRejected_ = false;
     std::string readBuffer_;
+    std::map<std::string, IncomingTransfer> incomingTransfers_;
     std::chrono::steady_clock::time_point lastHeartbeatSentAt_ {};
 };
 
-void saveReceivedFiles(const AppConfig& config, const json& message)
+CliAppConfig prepareConfig(int argc, char* argv[])
 {
-    if (!message.contains("files") || !message["files"].is_array()) {
-        return;
+    CliConfigStore store("linux-cli");
+    CliAppConfig config = store.load();
+    const CliAppConfig argsConfig = parseArgs(argc, argv);
+
+    config.host = argsConfig.host != "127.0.0.1" ? argsConfig.host : config.host;
+    config.port = argsConfig.port != 8080 ? argsConfig.port : config.port;
+    config.username = argsConfig.username != "admin" ? argsConfig.username : config.username;
+    config.password = argsConfig.password != "admin" ? argsConfig.password : config.password;
+    if (!argsConfig.receiveDir.empty()) {
+        config.receiveDir = argsConfig.receiveDir;
+    }
+    config.tlsEnabled = argsConfig.tlsEnabled || config.tlsEnabled;
+    if (!argsConfig.tlsCaFile.empty()) {
+        config.tlsCaFile = argsConfig.tlsCaFile;
+    }
+    if (!argsConfig.allowInsecureTls) {
+        config.allowInsecureTls = false;
     }
 
-    std::filesystem::create_directories(config.receiveDir);
-    const auto batchDir = std::filesystem::path(config.receiveDir) /
-        (currentTimestamp() + "-" + sanitizeFileName(message.value("sender", "peer")));
-    std::filesystem::create_directories(batchDir);
-
-    std::size_t savedCount = 0;
-    for (const auto& item : message["files"]) {
-        std::vector<unsigned char> decoded;
-        if (!decodeBase64(item.value("data", ""), decoded)) {
-            continue;
-        }
-
-        auto targetPath = batchDir / sanitizeFileName(item.value("name", "clipboard-file"));
-        if (std::filesystem::exists(targetPath)) {
-            targetPath = batchDir / (targetPath.stem().string() + "-" + currentTimestamp() + targetPath.extension().string());
-        }
-
-        std::ofstream stream(targetPath, std::ios::binary);
-        stream.write(reinterpret_cast<const char*>(decoded.data()), static_cast<std::streamsize>(decoded.size()));
-        ++savedCount;
+    while (config.receiveDir.empty()) {
+        std::cout << "Enter the default receive directory for incoming files: ";
+        std::getline(std::cin, config.receiveDir);
+        config.receiveDir = trim(config.receiveDir);
     }
 
-    std::cout << "Saved " << savedCount << " file(s) to " << batchDir << std::endl;
+    std::string resolvedDir;
+    while (!ensureDirectoryInteractive(config.receiveDir, true, resolvedDir)) {
+        std::cout << "Please enter another directory path: ";
+        std::getline(std::cin, config.receiveDir);
+        config.receiveDir = trim(config.receiveDir);
+    }
+    config.receiveDir = resolvedDir;
+
+    std::string errorMessage;
+    if (!store.save(config, &errorMessage)) {
+        std::cerr << "Failed to save CLI config: " << errorMessage << std::endl;
+    } else {
+        std::cout << "CLI config saved to " << store.configPath() << std::endl;
+    }
+
+    return config;
 }
 }
 
@@ -653,7 +761,7 @@ int main(int argc, char* argv[])
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    AppConfig config = parseArgs(argc, argv);
+    CliAppConfig config = prepareConfig(argc, argv);
     std::filesystem::create_directories(config.receiveDir);
 
     ClientConnection connection(config);
@@ -688,7 +796,11 @@ int main(int argc, char* argv[])
                 clipboardState.signature = "text:" + content;
                 std::cout << "Updated local clipboard text" << std::endl;
             } else if (type == "file_bundle") {
-                saveReceivedFiles(config, message);
+                connection.saveLegacyFiles(message);
+            } else if (type == "file_transfer_start" ||
+                       type == "file_transfer_chunk" ||
+                       type == "file_transfer_complete") {
+                connection.handleChunkTransfer(message);
             }
         }
 
@@ -700,7 +812,11 @@ int main(int argc, char* argv[])
             nextClipboardPollAt = now + kClipboardPollInterval;
             const auto clipboardMessage = pollClipboard(clipboardState);
             if (clipboardMessage.has_value()) {
-                connection.sendJson(*clipboardMessage);
+                if (clipboardMessage->chunked) {
+                    connection.sendChunkedFiles(clipboardMessage->paths);
+                } else {
+                    connection.sendJson(clipboardMessage->message);
+                }
             }
         }
 

@@ -1,22 +1,15 @@
 #include "tcpserver.h"
 
-#include <algorithm>
 #include <cerrno>
-#include <cctype>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 
 #include <openssl/err.h>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <openssl/ssl.h>
 
 #ifdef _WIN32
@@ -31,43 +24,6 @@
 namespace {
 constexpr std::size_t kReadChunkSize = 32 * 1024;
 constexpr auto kCleanupInterval = std::chrono::minutes(15);
-
-std::string currentTimestamp()
-{
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t raw = std::chrono::system_clock::to_time_t(now);
-    std::tm tm {};
-#ifdef _WIN32
-    localtime_s(&tm, &raw);
-#else
-    localtime_r(&raw, &tm);
-#endif
-
-    std::ostringstream stream;
-    stream << std::put_time(&tm, "%Y%m%d-%H%M%S");
-    return stream.str();
-}
-
-std::filesystem::path makeFilePathUnique(const std::filesystem::path& requestedPath)
-{
-    if (!std::filesystem::exists(requestedPath)) {
-        return requestedPath;
-    }
-
-    const auto stem = requestedPath.stem().string();
-    const auto extension = requestedPath.extension().string();
-
-    for (int index = 1; index < 10000; ++index) {
-        const auto candidate = requestedPath.parent_path() /
-            (stem + "-" + std::to_string(index) + extension);
-        if (!std::filesystem::exists(candidate)) {
-            return candidate;
-        }
-    }
-
-    return requestedPath.parent_path() /
-        (stem + "-" + currentTimestamp() + extension);
-}
 }
 
 TcpServer::TcpServer(std::size_t maxMessageBytes)
@@ -102,7 +58,7 @@ void TcpServer::configureStorage(const std::string& storageDir, int retentionDay
     if (!storageDir.empty()) {
         storageDir_ = storageDir;
     }
-    retentionDays_ = std::max(0, retentionDays);
+    retentionDays_ = retentionDays;
 }
 
 void TcpServer::configureTls(bool enabled, const std::string& certificateFile, const std::string& privateKeyFile)
@@ -182,6 +138,7 @@ void TcpServer::stopServer()
     {
         std::lock_guard<std::mutex> lock(clientsMutex_);
         for (const auto& [socket, client] : clients_) {
+            cleanupClientTransfers(client);
             if (client && client->ssl != nullptr) {
                 SSL_shutdown(client->ssl);
                 SSL_free(client->ssl);
@@ -452,6 +409,8 @@ void TcpServer::removeClient(SocketType socket)
         clients_.erase(it);
     }
 
+    cleanupClientTransfers(client);
+
     if (client && client->ssl != nullptr) {
         SSL_shutdown(client->ssl);
         SSL_free(client->ssl);
@@ -523,6 +482,13 @@ void TcpServer::processMessage(const std::shared_ptr<ClientConnection>& client, 
         return;
     }
 
+    if (messageType == "file_transfer_start" ||
+        messageType == "file_transfer_chunk" ||
+        messageType == "file_transfer_complete") {
+        handleChunkTransfer(client, message);
+        return;
+    }
+
     sendJson(client, json{{"type", "error"}, {"message", "Unsupported message type"}});
 }
 
@@ -571,21 +537,19 @@ void TcpServer::broadcastMessage(const json& message, SocketType excludeSocket)
 
 bool TcpServer::ensureStorageDir()
 {
-    try {
-        if (storageDir_.empty()) {
-            storageDir_ = "received_files";
-        }
-        std::filesystem::create_directories(storageDir_);
-        return true;
-    } catch (const std::exception& error) {
-        std::cerr << "Failed to prepare storage directory: " << error.what() << std::endl;
+    if (storageDir_.empty()) {
+        storageDir_ = "received_files";
+    }
+    if (!filetransfer::ensureDirectory(storageDir_)) {
+        std::cerr << "Failed to prepare storage directory: " << storageDir_ << std::endl;
         return false;
     }
+    return true;
 }
 
 void TcpServer::cleanupExpiredFiles()
 {
-    if (retentionDays_ <= 0) {
+    if (retentionDays_ < 0) {
         return;
     }
 
@@ -605,64 +569,6 @@ void TcpServer::cleanupExpiredFiles()
     }
 }
 
-std::string TcpServer::sanitizeFileName(const std::string& fileName) const
-{
-    std::string sanitized = fileName.empty() ? "clipboard-file" : fileName;
-    std::replace_if(sanitized.begin(), sanitized.end(), [](char value) {
-        return value == '/' || value == '\\' || value == ':' || value == '*' ||
-            value == '?' || value == '"' || value == '<' || value == '>' || value == '|';
-    }, '_');
-    return sanitized;
-}
-
-bool TcpServer::decodeBase64(const std::string& input, std::vector<unsigned char>& output) const
-{
-    std::string compact;
-    compact.reserve(input.size());
-    for (const char character : input) {
-        if (!std::isspace(static_cast<unsigned char>(character))) {
-            compact.push_back(character);
-        }
-    }
-
-    if (compact.empty()) {
-        output.clear();
-        return true;
-    }
-
-    output.assign((compact.size() * 3) / 4 + 4, 0);
-    const int decodedLength = EVP_DecodeBlock(output.data(),
-        reinterpret_cast<const unsigned char*>(compact.data()),
-        static_cast<int>(compact.size()));
-    if (decodedLength < 0) {
-        output.clear();
-        return false;
-    }
-
-    std::size_t actualLength = static_cast<std::size_t>(decodedLength);
-    if (!compact.empty() && compact.back() == '=') {
-        --actualLength;
-    }
-    if (compact.size() > 1 && compact[compact.size() - 2] == '=') {
-        --actualLength;
-    }
-    output.resize(actualLength);
-    return true;
-}
-
-std::string TcpServer::sha256Hex(const std::vector<unsigned char>& data) const
-{
-    unsigned char hash[SHA256_DIGEST_LENGTH] = {0};
-    SHA256(data.data(), data.size(), hash);
-
-    std::ostringstream stream;
-    stream << std::hex << std::setfill('0');
-    for (const unsigned char byte : hash) {
-        stream << std::setw(2) << static_cast<int>(byte);
-    }
-    return stream.str();
-}
-
 void TcpServer::persistFiles(const std::shared_ptr<ClientConnection>& client, const json& message)
 {
     if (!message.contains("files") || !message["files"].is_array()) {
@@ -671,12 +577,11 @@ void TcpServer::persistFiles(const std::shared_ptr<ClientConnection>& client, co
     }
 
     const auto batchDir = std::filesystem::path(storageDir_) /
-        (currentTimestamp() + "-" + sanitizeFileName(client->username.empty() ? "anonymous" : client->username));
+        (filetransfer::currentTimestamp() + "-" + filetransfer::sanitizeFileName(
+            client->username.empty() ? "anonymous" : client->username));
 
-    try {
-        std::filesystem::create_directories(batchDir);
-    } catch (const std::exception& error) {
-        sendJson(client, json{{"type", "error"}, {"message", std::string("Failed to create storage directory: ") + error.what()}});
+    if (!filetransfer::ensureDirectory(batchDir)) {
+        sendJson(client, json{{"type", "error"}, {"message", "Failed to create storage directory"}});
         return;
     }
 
@@ -690,7 +595,7 @@ void TcpServer::persistFiles(const std::shared_ptr<ClientConnection>& client, co
         const std::string base64Data = item.value("data", "");
         std::vector<unsigned char> decoded;
 
-        if (!decodeBase64(base64Data, decoded)) {
+        if (!filetransfer::decodeBase64(base64Data, decoded)) {
             sendJson(client, json{{"type", "error"}, {"message", "Failed to decode base64 file payload"}});
             continue;
         }
@@ -702,16 +607,154 @@ void TcpServer::persistFiles(const std::shared_ptr<ClientConnection>& client, co
         }
 
         const std::string expectedSha = item.value("sha256", "");
-        if (!expectedSha.empty() && sha256Hex(decoded) != expectedSha) {
+        if (!expectedSha.empty() && filetransfer::sha256Hex(decoded) != expectedSha) {
             sendJson(client, json{{"type", "error"}, {"message", "SHA256 mismatch while storing file"}});
             continue;
         }
 
-        auto targetPath = makeFilePathUnique(batchDir / sanitizeFileName(originalName));
+        auto targetPath = filetransfer::makeFilePathUnique(batchDir / filetransfer::sanitizeFileName(originalName));
         std::ofstream stream(targetPath, std::ios::binary);
         stream.write(reinterpret_cast<const char*>(decoded.data()), static_cast<std::streamsize>(decoded.size()));
         stream.close();
     }
 
     cleanupExpiredFiles();
+}
+
+void TcpServer::handleChunkTransfer(const std::shared_ptr<ClientConnection>& client, const json& message)
+{
+    const std::string type = message.value("type", "");
+    if (type == "file_transfer_start") {
+        handleChunkTransferStart(client, message);
+    } else if (type == "file_transfer_chunk") {
+        handleChunkTransferChunk(client, message);
+    } else if (type == "file_transfer_complete") {
+        handleChunkTransferComplete(client, message);
+    }
+
+    json forwarded = message;
+    forwarded["sender"] = client->username;
+    broadcastMessage(forwarded, client->socket);
+}
+
+void TcpServer::handleChunkTransferStart(const std::shared_ptr<ClientConnection>& client, const json& message)
+{
+    const std::string transferId = message.value("transfer_id", "");
+    if (transferId.empty()) {
+        sendJson(client, json{{"type", "error"}, {"message", "Missing transfer_id"}});
+        return;
+    }
+
+    auto& transfers = client->incomingTransfers;
+    if (const auto existing = transfers.find(transferId); existing != transfers.end()) {
+        if (existing->second.output && existing->second.output->is_open()) {
+            existing->second.output->close();
+        }
+        if (!existing->second.targetPath.empty()) {
+            std::filesystem::remove(existing->second.targetPath);
+        }
+        transfers.erase(existing);
+    }
+
+    filetransfer::IncomingTransferState transfer;
+    transfer.transferId = transferId;
+    transfer.sender = client->username;
+    transfer.fileName = filetransfer::sanitizeFileName(message.value("name", "clipboard-file"));
+    transfer.mimeType = message.value("mime", "");
+    transfer.sha256 = message.value("sha256", "");
+    transfer.expectedSize = static_cast<std::size_t>(message.value("size", 0));
+    transfer.directory = std::filesystem::path(storageDir_) /
+        (filetransfer::currentTimestamp() + "-" + filetransfer::sanitizeFileName(
+            client->username.empty() ? "anonymous" : client->username));
+
+    if (!filetransfer::ensureDirectory(transfer.directory)) {
+        sendJson(client, json{{"type", "error"}, {"message", "Failed to create storage directory for transfer"}});
+        return;
+    }
+
+    transfer.targetPath = filetransfer::makeFilePathUnique(transfer.directory / transfer.fileName);
+    transfer.output = std::make_unique<std::ofstream>(transfer.targetPath, std::ios::binary);
+    if (!transfer.output || !transfer.output->is_open()) {
+        sendJson(client, json{{"type", "error"}, {"message", "Failed to open transfer output file"}});
+        return;
+    }
+
+    transfers.emplace(transferId, std::move(transfer));
+}
+
+void TcpServer::handleChunkTransferChunk(const std::shared_ptr<ClientConnection>& client, const json& message)
+{
+    const std::string transferId = message.value("transfer_id", "");
+    auto it = client->incomingTransfers.find(transferId);
+    if (it == client->incomingTransfers.end()) {
+        sendJson(client, json{{"type", "error"}, {"message", "Unknown transfer_id for chunk"}});
+        return;
+    }
+
+    std::vector<unsigned char> decoded;
+    if (!filetransfer::decodeBase64(message.value("data", ""), decoded)) {
+        sendJson(client, json{{"type", "error"}, {"message", "Failed to decode transfer chunk"}});
+        return;
+    }
+
+    if (it->second.receivedSize + decoded.size() > maxMessageBytes_) {
+        sendJson(client, json{{"type", "error"}, {"message", "Transfer exceeded server size limit"}});
+        cleanupClientTransfers(client);
+        return;
+    }
+
+    it->second.output->write(reinterpret_cast<const char*>(decoded.data()),
+        static_cast<std::streamsize>(decoded.size()));
+    it->second.receivedSize += decoded.size();
+}
+
+void TcpServer::handleChunkTransferComplete(const std::shared_ptr<ClientConnection>& client, const json& message)
+{
+    const std::string transferId = message.value("transfer_id", "");
+    auto it = client->incomingTransfers.find(transferId);
+    if (it == client->incomingTransfers.end()) {
+        sendJson(client, json{{"type", "error"}, {"message", "Unknown transfer_id for completion"}});
+        return;
+    }
+
+    auto transfer = std::move(it->second);
+    client->incomingTransfers.erase(it);
+
+    if (transfer.output && transfer.output->is_open()) {
+        transfer.output->close();
+    }
+
+    if (transfer.expectedSize > 0 && transfer.receivedSize != transfer.expectedSize) {
+        std::filesystem::remove(transfer.targetPath);
+        sendJson(client, json{{"type", "error"}, {"message", "Received file size does not match metadata"}});
+        return;
+    }
+
+    if (!transfer.sha256.empty()) {
+        const std::string actualHash = filetransfer::sha256HexForFile(transfer.targetPath);
+        if (actualHash != transfer.sha256) {
+            std::filesystem::remove(transfer.targetPath);
+            sendJson(client, json{{"type", "error"}, {"message", "Received file hash does not match metadata"}});
+            return;
+        }
+    }
+
+    cleanupExpiredFiles();
+}
+
+void TcpServer::cleanupClientTransfers(const std::shared_ptr<ClientConnection>& client)
+{
+    if (client == nullptr) {
+        return;
+    }
+
+    for (auto& [transferId, transfer] : client->incomingTransfers) {
+        if (transfer.output && transfer.output->is_open()) {
+            transfer.output->close();
+        }
+        if (!transfer.targetPath.empty()) {
+            std::filesystem::remove(transfer.targetPath);
+        }
+    }
+    client->incomingTransfers.clear();
 }

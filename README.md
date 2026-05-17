@@ -49,16 +49,26 @@ Remote Clipboard 致力于解决多设备协作中的一个高频问题：在不
 - `auth_response`
 - `clipboard_text`
 - `file_bundle`
+- `file_transfer_start`
+- `file_transfer_chunk`
+- `file_transfer_complete`
 - `ping`
 - `pong`
 
 其中：
 
 - 文本内容通过 `clipboard_text` 传输
-- 文件内容通过 `file_bundle` 传输
-- 文件数据编码在 `file_bundle.files[*].data` 字段中，采用 Base64 表示
+- 小文件内容通过 `file_bundle` 传输
+- 大文件内容通过 `file_transfer_start/chunk/complete` 分片传输
+- `file_bundle.files[*].data` 和 `file_transfer_chunk.data` 都采用 Base64 表示
 
-为了兼容 `64MB` 服务端版本，客户端当前将单次文件批量传输限制在 32MB 以内。这是一个有意保留的安全边界，用于避免在异常场景下造成过高的内存占用。
+当前默认策略如下：
+
+- 4MB 以下文件优先走 `file_bundle`
+- 4MB 及以上文件自动切换到分片传输
+- 默认分片大小为 512KB
+
+这样做是为了兼顾图片类文件的高频传输和 `64MB` 服务端版本的内存安全边界。
 
 ## TLS 设计
 
@@ -100,8 +110,13 @@ openssl req -x509 -nodes -newkey rsa:2048 \
 
 客户端收到文件后，会将其写入用户指定目录。
 
-- Linux GUI / Windows GUI：通过界面中的 `Receive Dir` 设置，配置会持久化保存
-- Linux CLI：通过 `--receive-dir /path/to/dir` 指定
+- Linux GUI / Windows GUI：通过设置界面配置，支持手动输入路径或文件管理器选择目录
+- Linux CLI：首次启动时提示输入目录，后续默认读取配置文件
+
+若目录不存在：
+
+- GUI 客户端会询问是否创建，并提示创建结果
+- CLI 客户端会在终端询问是否创建，并提示创建结果
 
 ### 服务端
 
@@ -111,6 +126,8 @@ openssl req -x509 -nodes -newkey rsa:2048 \
   指定服务端文件保存目录
 - `--retention-days N`
   指定文件保留天数
+- `--retention-days -1`
+  表示不限时保留
 
 服务端接收到文件后会执行以下流程：
 
@@ -192,6 +209,52 @@ GUI 客户端启动后，填写以下信息即可连接：
 - TLS 相关选项（可选）
 
 认证成功后，客户端会开始监听本地剪贴板，并自动同步文本或文件内容。
+
+## 配置文件
+
+项目现在为 GUI、CLI 和服务端都引入了正式的 JSON 配置文件。
+
+### GUI 客户端
+
+- Windows GUI：`AppConfigLocation/RemoteClipboardWindowsClient/config.json`
+- Linux GUI：`AppConfigLocation/RemoteClipboardLinuxClient/config.json`
+
+GUI 配置文件保存以下内容：
+
+- 多组服务器分组
+- 当前分组与上次成功连接分组
+- 接收目录
+- 自启动开关
+- 自启动后是否自动使用上次连接
+- 快捷键
+
+### Linux CLI
+
+- `~/.config/RemoteClipboard/linux-cli/config.json`
+
+CLI 配置文件保存默认服务器连接参数和默认接收目录。若要更改默认接收目录，也可以直接编辑这个文件。
+
+### 服务端
+
+- 64MB 版默认：`~/.config/RemoteClipboard/server-64mb/config.json`
+- 512MB 版默认：`~/.config/RemoteClipboard/server-512mb/config.json`
+
+也可以通过 `--config-name <name>` 使用不同命名空间的配置文件。
+
+## 设置能力
+
+GUI 客户端现在支持：
+
+- 多组中转广播服务器分组管理与快速切换
+- 设置接收文件目录
+- 自启动注册
+- 自启动后默认使用上一次成功连接信息
+- 快捷键设置
+
+快捷键说明：
+
+- Windows：支持全局热键弹出窗口、切换配置
+- Linux Wayland：提供窗口内快捷键和托盘切换；全局热键受桌面环境与 Wayland 限制
 
 ## 构建指南
 
