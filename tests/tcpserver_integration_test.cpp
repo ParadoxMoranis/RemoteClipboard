@@ -249,150 +249,155 @@ int main()
     const auto storageDirectory = directory / "files";
     const auto databasePath = directory / "events.sqlite3";
 
-    TcpServer server(1024 * 1024);
-    server.setCredentials("test-user", "test-secret");
-    server.configureStorage(storageDirectory.string(), 7);
-    server.configureDatabase(databasePath.string());
-    const bool started = server.startServer(0);
-    RC_EXPECT(test, started);
-    if (!started) {
-        std::filesystem::remove_all(directory);
-        return test.result();
-    }
-    RC_EXPECT(test, server.boundPort() != 0);
-
-    TestSocket first = connectClient(server.boundPort());
-    TestSocket second = connectClient(server.boundPort());
-    RC_EXPECT(test, first != kInvalidTestSocket);
-    RC_EXPECT(test, second != kInvalidTestSocket);
-    RC_EXPECT(test, authenticate(first));
-    RC_EXPECT(test, authenticate(second));
-
-    Json text = remoteclipboard::v1::makeClipboardText("integration hello");
-    text["event_id"] = "event'; SELECT 1; --";
-    text["device_id"] = "device'; DROP TABLE clipboard_events; --";
-    RC_EXPECT(test, sendJson(first, text));
-    const auto deliveredText = receiveJson(second);
-    RC_EXPECT(test, deliveredText.has_value());
-    RC_EXPECT_EQ(test, deliveredText.value_or(Json::object()).value("content", ""),
-                 "integration hello");
-
-    const Json invalidBundle = {
-        {"type", remoteclipboard::v1::type::kFileBundle},
-        {"files", Json::array({Json{{"name", "bad.txt"}, {"data", "%%=="}}})},
-    };
-    RC_EXPECT(test, sendJson(first, invalidBundle));
-    RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
-                 "INVALID_FILE");
-    RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
-
-    const Json checksumMismatchBundle = {
-        {"type", remoteclipboard::v1::type::kFileBundle},
-        {"files", Json::array({Json{{"name", "mismatch.txt"},
-                                    {"size", 3},
-                                    {"sha256", std::string(64, '0')},
-                                    {"data", "YWJj"}}})},
-    };
-    RC_EXPECT(test, sendJson(first, checksumMismatchBundle));
-    RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
-                 "CHECKSUM_MISMATCH");
-    RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
-
-    const std::vector<unsigned char> abc = {'a', 'b', 'c'};
-    const std::string abcHash = filetransfer::sha256Hex(abc);
-    RC_EXPECT(test, sendJson(first, remoteclipboard::v1::makeTransferStart(
-                                        "transfer-ok", "../safe.txt", 3, abcHash)));
-    RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
-                 remoteclipboard::v1::type::kTransferStart);
-
-    RC_EXPECT(test,
-              sendJson(first, remoteclipboard::v1::makeTransferChunk("transfer-ok", 1, "YWJj")));
-    RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
-                 "INVALID_SEQUENCE");
-    RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
-
-    RC_EXPECT(test,
-              sendJson(first, remoteclipboard::v1::makeTransferChunk("transfer-ok", 0, "YWJj")));
-    RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
-                 remoteclipboard::v1::type::kTransferChunk);
-    RC_EXPECT(test,
-              sendJson(first, remoteclipboard::v1::makeTransferChunk("transfer-ok", 0, "YWJj")));
-    RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
-                 "INVALID_SEQUENCE");
-    RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
-
-    RC_EXPECT(test, sendJson(first, remoteclipboard::v1::makeTransferComplete("transfer-ok")));
-    RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
-                 remoteclipboard::v1::type::kTransferComplete);
-
-    bool foundCommittedFile = false;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(storageDirectory)) {
-        if (entry.is_regular_file() && entry.path().filename() == "safe.txt") {
-            foundCommittedFile = true;
+    {
+        TcpServer server(1024 * 1024);
+        server.setCredentials("test-user", "test-secret");
+        server.configureStorage(storageDirectory.string(), 7);
+        server.configureDatabase(databasePath.string());
+        const bool started = server.startServer(0);
+        RC_EXPECT(test, started);
+        if (!started) {
+            return test.result();
         }
-    }
-    RC_EXPECT(test, foundCommittedFile);
+        RC_EXPECT(test, server.boundPort() != 0);
 
-    TestSocket oversizedWithNewline = connectClient(server.boundPort());
-    RC_EXPECT(test, authenticate(oversizedWithNewline));
-    RC_EXPECT(test, sendAll(oversizedWithNewline, std::string(1024 * 1024 + 1, 'x') + "\n"));
-    const auto oversizedResponse = receiveJson(oversizedWithNewline, 2s);
-    RC_EXPECT(test, !oversizedResponse.has_value() ||
-                        oversizedResponse->value("code", "") == "FRAME_TOO_LARGE");
-    closeTestSocket(oversizedWithNewline);
+        TestSocket first = connectClient(server.boundPort());
+        TestSocket second = connectClient(server.boundPort());
+        RC_EXPECT(test, first != kInvalidTestSocket);
+        RC_EXPECT(test, second != kInvalidTestSocket);
+        RC_EXPECT(test, authenticate(first));
+        RC_EXPECT(test, authenticate(second));
 
-    TestSocket oversizedWithoutNewline = connectClient(server.boundPort());
-    RC_EXPECT(test, authenticate(oversizedWithoutNewline));
-    RC_EXPECT(test, sendAll(oversizedWithoutNewline, std::string(1024 * 1024 + 1, 'y')));
-    const auto noNewlineResponse = receiveJson(oversizedWithoutNewline, 2s);
-    RC_EXPECT(test, !noNewlineResponse.has_value() ||
-                        noNewlineResponse->value("code", "") == "FRAME_TOO_LARGE");
-    closeTestSocket(oversizedWithoutNewline);
+        Json text = remoteclipboard::v1::makeClipboardText("integration hello");
+        text["event_id"] = "event'; SELECT 1; --";
+        text["device_id"] = "device'; DROP TABLE clipboard_events; --";
+        RC_EXPECT(test, sendJson(first, text));
+        const auto deliveredText = receiveJson(second);
+        RC_EXPECT(test, deliveredText.has_value());
+        RC_EXPECT_EQ(test, deliveredText.value_or(Json::object()).value("content", ""),
+                     "integration hello");
 
-    closeTestSocket(first);
-    closeTestSocket(second);
-    const auto stopStarted = std::chrono::steady_clock::now();
-    server.stopServer();
-    RC_EXPECT(test, std::chrono::steady_clock::now() - stopStarted < 3s);
-    RC_EXPECT_EQ(test, server.activeSessionCount(), 0U);
-    RC_EXPECT(test, eventCount(databasePath) >= 4);
+        const Json invalidBundle = {
+            {"type", remoteclipboard::v1::type::kFileBundle},
+            {"files", Json::array({Json{{"name", "bad.txt"}, {"data", "%%=="}}})},
+        };
+        RC_EXPECT(test, sendJson(first, invalidBundle));
+        RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
+                     "INVALID_FILE");
+        RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
 
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        RC_EXPECT(test, server.startServer(0));
+        const Json checksumMismatchBundle = {
+            {"type", remoteclipboard::v1::type::kFileBundle},
+            {"files", Json::array({Json{{"name", "mismatch.txt"},
+                                        {"size", 3},
+                                        {"sha256", std::string(64, '0')},
+                                        {"data", "YWJj"}}})},
+        };
+        RC_EXPECT(test, sendJson(first, checksumMismatchBundle));
+        RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
+                     "CHECKSUM_MISMATCH");
+        RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
+
+        const std::vector<unsigned char> abc = {'a', 'b', 'c'};
+        const std::string abcHash = filetransfer::sha256Hex(abc);
+        RC_EXPECT(test, sendJson(first, remoteclipboard::v1::makeTransferStart(
+                                            "transfer-ok", "../safe.txt", 3, abcHash)));
+        RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
+                     remoteclipboard::v1::type::kTransferStart);
+
+        RC_EXPECT(test, sendJson(first,
+                                 remoteclipboard::v1::makeTransferChunk("transfer-ok", 1, "YWJj")));
+        RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
+                     "INVALID_SEQUENCE");
+        RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
+
+        RC_EXPECT(test, sendJson(first,
+                                 remoteclipboard::v1::makeTransferChunk("transfer-ok", 0, "YWJj")));
+        RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
+                     remoteclipboard::v1::type::kTransferChunk);
+        RC_EXPECT(test, sendJson(first,
+                                 remoteclipboard::v1::makeTransferChunk("transfer-ok", 0, "YWJj")));
+        RC_EXPECT_EQ(test, receiveJson(first).value_or(Json::object()).value("code", ""),
+                     "INVALID_SEQUENCE");
+        RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
+
+        RC_EXPECT(test, sendJson(first, remoteclipboard::v1::makeTransferComplete("transfer-ok")));
+        RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
+                     remoteclipboard::v1::type::kTransferComplete);
+
+        bool foundCommittedFile = false;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(storageDirectory)) {
+            if (entry.is_regular_file() && entry.path().filename() == "safe.txt") {
+                foundCommittedFile = true;
+            }
+        }
+        RC_EXPECT(test, foundCommittedFile);
+
+        TestSocket oversizedWithNewline = connectClient(server.boundPort());
+        RC_EXPECT(test, authenticate(oversizedWithNewline));
+        RC_EXPECT(test, sendAll(oversizedWithNewline, std::string(1024 * 1024 + 1, 'x') + "\n"));
+        const auto oversizedResponse = receiveJson(oversizedWithNewline, 2s);
+        RC_EXPECT(test, !oversizedResponse.has_value() ||
+                            oversizedResponse->value("code", "") == "FRAME_TOO_LARGE");
+        closeTestSocket(oversizedWithNewline);
+
+        TestSocket oversizedWithoutNewline = connectClient(server.boundPort());
+        RC_EXPECT(test, authenticate(oversizedWithoutNewline));
+        RC_EXPECT(test, sendAll(oversizedWithoutNewline, std::string(1024 * 1024 + 1, 'y')));
+        const auto noNewlineResponse = receiveJson(oversizedWithoutNewline, 2s);
+        RC_EXPECT(test, !noNewlineResponse.has_value() ||
+                            noNewlineResponse->value("code", "") == "FRAME_TOO_LARGE");
+        closeTestSocket(oversizedWithoutNewline);
+
+        closeTestSocket(first);
+        closeTestSocket(second);
+        const auto stopStarted = std::chrono::steady_clock::now();
         server.stopServer();
+        RC_EXPECT(test, std::chrono::steady_clock::now() - stopStarted < 3s);
+        RC_EXPECT_EQ(test, server.activeSessionCount(), 0U);
+        RC_EXPECT(test, eventCount(databasePath) >= 4);
+
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            RC_EXPECT(test, server.startServer(0));
+            server.stopServer();
+        }
     }
 
     const auto certificatePath = directory / "test-certificate.pem";
     const auto keyPath = directory / "test-key.pem";
     RC_EXPECT(test, writeTestCertificate(certificatePath, keyPath));
-    TcpServer tlsServer(64 * 1024);
-    tlsServer.setCredentials("test-user", "test-secret");
-    tlsServer.configureStorage((directory / "tls-files").string(), 7);
-    tlsServer.configureTls(true, certificatePath.string(), keyPath.string());
-    RC_EXPECT(test, tlsServer.startServer(0));
+    {
+        TcpServer tlsServer(64 * 1024);
+        tlsServer.setCredentials("test-user", "test-secret");
+        tlsServer.configureStorage((directory / "tls-files").string(), 7);
+        tlsServer.configureTls(true, certificatePath.string(), keyPath.string());
+        RC_EXPECT(test, tlsServer.startServer(0));
 
-    TestSocket slowHandshake = connectClient(tlsServer.boundPort());
-    RC_EXPECT(test, slowHandshake != kInvalidTestSocket);
-    std::this_thread::sleep_for(50ms);
-    TestSocket tlsSocket = connectClient(tlsServer.boundPort());
-    SSL* ssl = nullptr;
-    SSL_CTX* sslContext = nullptr;
-    RC_EXPECT(test, tlsSocket != kInvalidTestSocket);
-    RC_EXPECT(test, authenticateTls(tlsSocket, ssl, sslContext));
-    RC_EXPECT(test, tlsServer.activeSessionCount() >= 2);
-    if (ssl != nullptr) {
-        SSL_shutdown(ssl);
-        SSL_free(ssl);
+        TestSocket slowHandshake = connectClient(tlsServer.boundPort());
+        RC_EXPECT(test, slowHandshake != kInvalidTestSocket);
+        std::this_thread::sleep_for(50ms);
+        TestSocket tlsSocket = connectClient(tlsServer.boundPort());
+        SSL* ssl = nullptr;
+        SSL_CTX* sslContext = nullptr;
+        RC_EXPECT(test, tlsSocket != kInvalidTestSocket);
+        RC_EXPECT(test, authenticateTls(tlsSocket, ssl, sslContext));
+        RC_EXPECT(test, tlsServer.activeSessionCount() >= 2);
+        if (ssl != nullptr) {
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
+        }
+        if (sslContext != nullptr) {
+            SSL_CTX_free(sslContext);
+        }
+        closeTestSocket(tlsSocket);
+        closeTestSocket(slowHandshake);
+        const auto tlsStopStarted = std::chrono::steady_clock::now();
+        tlsServer.stopServer();
+        RC_EXPECT(test, std::chrono::steady_clock::now() - tlsStopStarted < 3s);
     }
-    if (sslContext != nullptr) {
-        SSL_CTX_free(sslContext);
-    }
-    closeTestSocket(tlsSocket);
-    closeTestSocket(slowHandshake);
-    const auto tlsStopStarted = std::chrono::steady_clock::now();
-    tlsServer.stopServer();
-    RC_EXPECT(test, std::chrono::steady_clock::now() - tlsStopStarted < 3s);
 
-    std::filesystem::remove_all(directory);
+    std::error_code cleanupError;
+    std::filesystem::remove_all(directory, cleanupError);
+    RC_EXPECT(test, !cleanupError);
     return test.result();
 }
