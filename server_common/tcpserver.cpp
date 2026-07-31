@@ -133,7 +133,7 @@ void TcpServer::configureDatabase(const std::string& sqlitePath)
     storage_.reset();
 }
 
-void TcpServer::setStorage(std::shared_ptr<IStorage> storage)
+void TcpServer::setStorage(std::shared_ptr<IEventStorage> storage)
 {
     storage_ = std::move(storage);
     sqlitePath_.clear();

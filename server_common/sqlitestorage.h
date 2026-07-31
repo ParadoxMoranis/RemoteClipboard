@@ -7,7 +7,7 @@
 
 struct sqlite3;
 
-class SqliteStorage final : public IStorage
+class SqliteStorage final : public IEventStorage
 {
   public:
     explicit SqliteStorage(std::string databasePath);

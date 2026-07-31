@@ -47,7 +47,7 @@ class TcpServer
     void setCredentials(const std::string& username, const std::string& password);
     void configureStorage(const std::string& storageDir, int retentionDays);
     void configureDatabase(const std::string& sqlitePath);
-    void setStorage(std::shared_ptr<IStorage> storage);
+    void setStorage(std::shared_ptr<IEventStorage> storage);
     void configureTls(bool enabled, const std::string& certificateFile,
                       const std::string& privateKeyFile);
 
@@ -166,7 +166,7 @@ class TcpServer
     std::string privateKeyFile_;
     SSL_CTX* sslContext_ = nullptr;
 
-    std::shared_ptr<IStorage> storage_;
+    std::shared_ptr<IEventStorage> storage_;
     std::shared_ptr<MemoryRouter> router_;
     std::chrono::steady_clock::time_point lastCleanupAt_;
 };

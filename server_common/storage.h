@@ -32,10 +32,10 @@ struct StoredEvent
     std::int64_t createdAtUnixMs = 0;
 };
 
-class IStorage
+class IEventStorage
 {
   public:
-    virtual ~IStorage() = default;
+    virtual ~IEventStorage() = default;
     virtual StorageResult initialize() = 0;
     virtual StorageResult recordEvent(const StoredEvent& event) = 0;
 };
