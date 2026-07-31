@@ -13,9 +13,10 @@ struct ConnectionProfile {
     quint16 port = 8080;
     QString username;
     QString password;
-    bool useTls = false;
+    bool useTls = true;
     QString caCertificatePath;
-    bool allowInsecureTls = true;
+    bool allowInsecureTls = false;
+    bool developmentProfile = false;
 };
 
 struct GuiAppConfig {

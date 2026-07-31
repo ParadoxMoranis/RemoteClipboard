@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  RC_VERSION: 0.1.0
+
+jobs:
+  debian-packages:
+    runs-on: ubuntu-24.04
+    container: debian:12
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Debian build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            cmake \
+            dpkg-dev \
+            file \
+            libsqlite3-dev \
+            libssl-dev \
+            ninja-build \
+            nlohmann-json3-dev \
+            qt6-base-dev \
+            qt6-tools-dev-tools
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRC_BUILD_WINDOWS_GUI=OFF
+          -DRC_STATIC_GNU_RUNTIMES=OFF
+      - name: Build and test
+        run: |
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Build DEB packages
+        run: |
+          cpack -G DEB --config build/CPackConfig.cmake -B package-output
+          mkdir -p artifacts
+          for package in package-output/*.deb; do
+            package_name="$(dpkg-deb -f "$package" Package)"
+            architecture="$(dpkg-deb -f "$package" Architecture)"
+            cp "$package" "artifacts/${package_name}_${RC_VERSION}_${architecture}.deb"
+          done
+          test -f "artifacts/remote-clipboard-server_${RC_VERSION}_amd64.deb"
+          test -f "artifacts/remote-clipboard-client_${RC_VERSION}_amd64.deb"
+          for package in artifacts/*.deb; do
+            dpkg-deb --info "$package"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-debian
+          path: artifacts/*.deb
+          if-no-files-found: error
+
+  fedora-packages:
+    runs-on: ubuntu-24.04
+    container: fedora:42
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Fedora build dependencies
+        run: |
+          dnf install -y \
+            cmake \
+            gcc-c++ \
+            ninja-build \
+            nlohmann-json-devel \
+            openssl-devel \
+            qt6-qtbase-devel \
+            rpm-build \
+            sqlite-devel
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRC_BUILD_WINDOWS_GUI=OFF
+          -DRC_STATIC_GNU_RUNTIMES=OFF
+      - name: Build and test
+        run: |
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Build RPM packages
+        run: |
+          cpack -G RPM --config build/CPackConfig.cmake -B package-output
+          mkdir -p artifacts
+          for package in package-output/*.rpm; do
+            package_name="$(rpm -qp --qf '%{NAME}' "$package")"
+            architecture="$(rpm -qp --qf '%{ARCH}' "$package")"
+            cp "$package" "artifacts/${package_name}-${RC_VERSION}-1.${architecture}.rpm"
+          done
+          test -f "artifacts/remote-clipboard-server-${RC_VERSION}-1.x86_64.rpm"
+          test -f "artifacts/remote-clipboard-client-${RC_VERSION}-1.x86_64.rpm"
+          rpm -qpi artifacts/*.rpm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-fedora
+          path: artifacts/*.rpm
+          if-no-files-found: error
+
+  arch-package:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Arch Linux build dependencies
+        run: >-
+          pacman -Syu --needed --noconfirm
+          cmake git ninja nlohmann-json openssl qt6-base sqlite wl-clipboard
+      - name: Build local Arch Linux client package
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env OUTPUT_DIR="$GITHUB_WORKSPACE/artifacts" \
+            "$GITHUB_WORKSPACE/scripts/build-arch-client-package.sh"
+          test -f "artifacts/remote-clipboard-client-${RC_VERSION}-1-x86_64.pkg.tar.zst"
+          pacman -Qip artifacts/*.pkg.tar.zst
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-arch
+          path: artifacts/*.pkg.tar.zst
+          if-no-files-found: error
+
+  windows-package:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-sqlite3
+      - name: Configure
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRC_BUILD_CLI=OFF
+          -DRC_BUILD_WAYLAND_GUI=OFF
+          -DRC_BUILD_WINDOWS_GUI=ON
+          -DRC_STATIC_GNU_RUNTIMES=OFF
+      - name: Build and test
+        shell: msys2 {0}
+        run: |
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Stage Windows x64 client
+        shell: msys2 {0}
+        run: bash scripts/stage-windows-package.sh build dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist/RemoteClipboard-client-windows-x64.zip
+          if-no-files-found: error
+
+  source-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build unified source package
+        run: |
+          mkdir -p artifacts
+          git archive --format=zip --prefix="RemoteClipboard-${RC_VERSION}/" \
+            --output="artifacts/RemoteClipboard-source-${RC_VERSION}.zip" HEAD
+          unzip -l "artifacts/RemoteClipboard-source-${RC_VERSION}.zip" | \
+            grep "scripts/build-server-from-source.sh"
+          unzip -l "artifacts/RemoteClipboard-source-${RC_VERSION}.zip" | \
+            grep "scripts/build-client-from-source.sh"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-source
+          path: artifacts/RemoteClipboard-source-*.zip
+          if-no-files-found: error
+
+  assemble:
+    needs:
+      - debian-packages
+      - fedora-packages
+      - arch-package
+      - windows-package
+      - source-package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | \
+            sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Attest release artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RemoteClipboard-${{ env.RC_VERSION }}-release-bundle
+          path: dist/*
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --title "Remote Clipboard ${GITHUB_REF_NAME}"
+          --notes-file docs/release-notes/v0.1.0.md

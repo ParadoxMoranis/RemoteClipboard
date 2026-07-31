@@ -3,10 +3,15 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <system_error>
 
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 namespace {
 std::filesystem::path homeDirectory()
@@ -75,10 +80,12 @@ CliAppConfig CliConfigStore::load() const
     config.port = static_cast<uint16_t>(root.value("port", static_cast<int>(config.port)));
     config.username = root.value("username", config.username);
     config.password = root.value("password", config.password);
+    config.passwordSecretFile = root.value("password_secret_file", config.passwordSecretFile);
     config.receiveDir = root.value("receive_directory", config.receiveDir);
     config.tlsEnabled = root.value("tls_enabled", config.tlsEnabled);
     config.tlsCaFile = root.value("tls_ca_file", config.tlsCaFile);
     config.allowInsecureTls = root.value("allow_insecure_tls", config.allowInsecureTls);
+    config.developmentMode = root.value("development_mode", config.developmentMode);
     return config;
 }
 
@@ -94,18 +101,21 @@ bool CliConfigStore::save(const CliAppConfig& config, std::string* errorMessage)
     }
 
     json root = {
-        {"version", 1},
+        {"version", 2},
         {"host", config.host},
         {"port", config.port},
         {"username", config.username},
-        {"password", config.password},
+        {"password_secret_file", config.passwordSecretFile},
         {"receive_directory", config.receiveDir},
         {"tls_enabled", config.tlsEnabled},
         {"tls_ca_file", config.tlsCaFile},
-        {"allow_insecure_tls", config.allowInsecureTls}
+        {"allow_insecure_tls", config.developmentMode && config.allowInsecureTls},
+        {"development_mode", config.developmentMode}
     };
 
-    std::ofstream output(configPath());
+    auto temporaryPath = configPath();
+    temporaryPath += ".tmp";
+    std::ofstream output(temporaryPath);
     if (!output) {
         if (errorMessage != nullptr) {
             *errorMessage = "Unable to write CLI config file";
@@ -114,6 +124,37 @@ bool CliConfigStore::save(const CliAppConfig& config, std::string* errorMessage)
     }
 
     output << root.dump(2) << std::endl;
+    output.close();
+    if (!output) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Unable to flush CLI config file";
+        }
+        return false;
+    }
+#ifndef _WIN32
+    chmod(temporaryPath.c_str(), S_IRUSR | S_IWUSR);
+#endif
+    std::error_code error;
+    if (std::filesystem::exists(configPath())) {
+        auto backupPath = configPath();
+        backupPath += ".bak";
+        std::filesystem::copy_file(configPath(), backupPath,
+            std::filesystem::copy_options::overwrite_existing, error);
+        if (error) {
+            if (errorMessage != nullptr) {
+                *errorMessage = error.message();
+            }
+            return false;
+        }
+        std::filesystem::remove(configPath(), error);
+    }
+    std::filesystem::rename(temporaryPath, configPath(), error);
+    if (error) {
+        if (errorMessage != nullptr) {
+            *errorMessage = error.message();
+        }
+        return false;
+    }
     return true;
 }
 

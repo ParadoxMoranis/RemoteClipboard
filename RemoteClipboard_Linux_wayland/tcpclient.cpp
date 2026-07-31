@@ -209,7 +209,7 @@ void TcpClient::beginConnection()
 
     if (useTls) {
         QSslConfiguration configuration = socket->sslConfiguration();
-        configuration.setProtocol(QSsl::TlsV1_2OrLater);
+        configuration.setProtocol(QSsl::TlsV1_3OrLater);
 
         if (!caCertificatePath.isEmpty()) {
             const QList<QSslCertificate> certificates = QSslCertificate::fromPath(caCertificatePath);

@@ -16,7 +16,7 @@ public:
                          quint16 port,
                          bool useTls,
                          const QString& caCertificatePath = QString(),
-                         bool allowInsecureTls = true);
+                         bool allowInsecureTls = false);
     void disconnectFromServer();
 
     bool isConnected() const;
@@ -55,7 +55,7 @@ private:
     quint16 port = 0;
     bool useTls = false;
     QString caCertificatePath;
-    bool allowInsecureTls = true;
+    bool allowInsecureTls = false;
     bool manualDisconnect = false;
     bool authenticated = false;
     int reconnectAttempt = 0;

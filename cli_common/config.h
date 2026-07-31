@@ -7,12 +7,15 @@
 struct CliAppConfig {
     std::string host = "127.0.0.1";
     uint16_t port = 8080;
-    std::string username = "admin";
-    std::string password = "admin";
+    std::string username;
+    std::string password;
+    std::string passwordSecretFile;
+    bool passwordFromCommandLine = false;
     std::string receiveDir;
-    bool tlsEnabled = false;
+    bool tlsEnabled = true;
     std::string tlsCaFile;
-    bool allowInsecureTls = true;
+    bool allowInsecureTls = false;
+    bool developmentMode = false;
 };
 
 class CliConfigStore {

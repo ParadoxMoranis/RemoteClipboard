@@ -1,0 +1,29 @@
+pkgname=remote-clipboard-client
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Qt Wayland and CLI clients for Remote Clipboard"
+arch=('x86_64')
+url="https://github.com/ParadoxMoranis/RemoteClipboard"
+license=('LicenseRef-Unspecified')
+depends=('gcc-libs' 'glibc' 'openssl' 'qt6-base' 'wl-clipboard')
+makedepends=('cmake' 'ninja' 'nlohmann-json')
+options=('!debug')
+source=("RemoteClipboard-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cmake -S "RemoteClipboard-${pkgver}" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DRC_BUILD_SERVERS=OFF \
+    -DRC_BUILD_CLI=ON \
+    -DRC_BUILD_WAYLAND_GUI=ON \
+    -DRC_BUILD_WINDOWS_GUI=OFF \
+    -DRC_BUILD_TESTS=OFF \
+    -DRC_STATIC_GNU_RUNTIMES=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build --component Client
+}

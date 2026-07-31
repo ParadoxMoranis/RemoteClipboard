@@ -8,9 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   gcc-c++ \
   make \
   cmake \
+  ninja-build \
   qt6-qtbase-devel \
   nlohmann-json-devel \
   openssl-devel \
+  sqlite-devel \
   wl-clipboard
 
 build_and_install_all

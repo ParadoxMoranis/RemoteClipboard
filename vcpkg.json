@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "remote-clipboard",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    "nlohmann-json",
+    "openssl",
+    "sqlite3"
+  ]
+}
