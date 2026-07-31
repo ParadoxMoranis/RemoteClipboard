@@ -3,8 +3,6 @@ name: Release
 on:
   workflow_dispatch:
   push:
-    branches:
-      - feature/windows-ci
     tags:
       - "v*"
 
