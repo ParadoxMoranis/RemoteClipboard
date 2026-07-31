@@ -1,5 +1,9 @@
 # 发布与兼容性管理
 
+## Implementation Status
+
+v0.1 已通过 `.github/workflows/release.yml` 实现 tag 驱动的 Debian 12 DEB、Fedora 42 RPM、Arch Linux 本地客户端包、Windows x64 客户端 ZIP 和统一源码 ZIP。每个平台在打包前完成构建与 CTest，聚合 job 生成 `SHA256SUMS`，tag 发布使用 GitHub OIDC 生成 Sigstore 构建证明。容器镜像、完整 SBOM、自动更新和许可证选择仍属于后续发布治理工作。
+
 ## Purpose
 
 定义版本、构建工件、兼容窗口、升级和回滚规则，使多客户端与协议服务端能够有序演进。

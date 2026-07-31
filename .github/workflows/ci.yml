@@ -70,47 +70,10 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Stage Windows package
         shell: msys2 {0}
-        run: |
-          package_root="$PWD/dist/RemoteClipboard-windows-x64"
-          cmake --install build --prefix "$package_root"
-          windeployqt6 --release --no-translations --compiler-runtime \
-            "$package_root/bin/remote-clipboard-windows.exe"
-
-          while true; do
-            copied_runtime=0
-            while IFS= read -r -d '' binary; do
-              while IFS= read -r dependency; do
-                runtime="$MINGW_PREFIX/bin/$dependency"
-                if [[ -f "$runtime" && ! -f "$package_root/bin/$dependency" ]]; then
-                  cp "$runtime" "$package_root/bin/$dependency"
-                  copied_runtime=1
-                fi
-              done < <(objdump -p "$binary" | sed -n 's/.*DLL Name: //p')
-            done < <(find "$package_root/bin" -type f \
-              \( -iname '*.exe' -o -iname '*.dll' \) -print0)
-
-            [[ "$copied_runtime" -eq 0 ]] && break
-          done
-
-          missing_runtime=0
-          while IFS= read -r -d '' binary; do
-            while IFS= read -r dependency; do
-              if [[ -f "$MINGW_PREFIX/bin/$dependency" && \
-                    ! -f "$package_root/bin/$dependency" ]]; then
-                echo "Missing runtime dependency: $dependency (required by $binary)" >&2
-                missing_runtime=1
-              fi
-            done < <(objdump -p "$binary" | sed -n 's/.*DLL Name: //p')
-          done < <(find "$package_root/bin" -type f \
-            \( -iname '*.exe' -o -iname '*.dll' \) -print0)
-          [[ "$missing_runtime" -eq 0 ]]
-
-          cd "$PWD/dist"
-          cmake -E tar cf "RemoteClipboard-windows-x64.zip" \
-            --format=zip -- "RemoteClipboard-windows-x64"
+        run: bash scripts/stage-windows-package.sh build dist
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: RemoteClipboard-windows-x64
-          path: dist/RemoteClipboard-windows-x64.zip
+          name: RemoteClipboard-client-windows-x64
+          path: dist/RemoteClipboard-client-windows-x64.zip
           if-no-files-found: error

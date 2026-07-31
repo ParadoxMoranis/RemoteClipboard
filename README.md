@@ -52,6 +52,7 @@ remote-clipboard-server-64mb \
 ```bash
 sudo apt-get install \
   build-essential cmake \
+  ninja-build \
   libssl-dev libsqlite3-dev nlohmann-json3-dev \
   qt6-base-dev qt6-tools-dev-tools wl-clipboard
 ```
@@ -93,12 +94,12 @@ Windows 的服务器与测试依赖记录在 `vcpkg.json`；Windows GUI 由宿�
 
 ### GitHub Windows 构建
 
-`.github/workflows/ci.yml` 使用 GitHub 托管的 Windows runner 和 MSYS2 UCRT64 构建完整 Windows 产物。每次 push、pull request 或手动运行都会：
+`.github/workflows/ci.yml` 使用 GitHub 托管的 Windows runner 和 MSYS2 UCRT64 验证完整 Windows 构建。每次 push、pull request 或手动运行都会：
 
 - 构建 Windows GUI、64 MiB / 512 MiB 服务端和全部测试；
 - 在真实 Windows 环境执行四个 CTest 目标；
 - 使用 `windeployqt6` 部署 Qt 插件及运行库；
-- 上传 `RemoteClipboard-windows-x64` 制品，其中包含可分发 ZIP。
+- 上传 `RemoteClipboard-client-windows-x64` 客户端制品，其中包含可分发 ZIP。
 
 已登录 GitHub CLI 时可手动触发并监控：
 
@@ -110,10 +111,49 @@ gh run watch
 最近一次成功构建的 Windows 制品可下载到当前目录：
 
 ```bash
-gh run download --name RemoteClipboard-windows-x64
+gh run download --name RemoteClipboard-client-windows-x64
 ```
 
 若 `gh auth status` 显示未登录，先在交互式终端运行 `gh auth login`。工作流必须先提交并推送到目标分支，GitHub 才能执行该版本。
+
+## 发布包
+
+`.github/workflows/release.yml` 从版本 tag 构建、测试并发布下列 x86_64 / amd64 制品：
+
+| 用途 | 平台 | 制品 |
+| --- | --- | --- |
+| 服务端 | Debian 12 | `remote-clipboard-server_<version>_amd64.deb` |
+| 服务端 | Fedora 42 | `remote-clipboard-server-<version>-1.x86_64.rpm` |
+| Linux 客户端 | Debian 12 | `remote-clipboard-client_<version>_amd64.deb` |
+| Linux 客户端 | Fedora 42 | `remote-clipboard-client-<version>-1.x86_64.rpm` |
+| Linux 客户端 | Arch Linux | `remote-clipboard-client-<version>-1-x86_64.pkg.tar.zst` |
+| Windows 客户端 | Windows x64 | `RemoteClipboard-client-windows-x64.zip` |
+| 服务端与客户端源码 | 通用 | `RemoteClipboard-source-<version>.zip` |
+
+Linux 原生包安装示例：
+
+```bash
+sudo apt install ./remote-clipboard-server_0.1.0_amd64.deb
+sudo dnf install ./remote-clipboard-client-0.1.0-1.x86_64.rpm
+sudo pacman -U ./remote-clipboard-client-0.1.0-1-x86_64.pkg.tar.zst
+```
+
+统一源码 ZIP 同时包含服务端和 Linux 客户端构建脚本。安装 README“构建”章节列出的依赖后运行：
+
+```bash
+./scripts/build-server-from-source.sh
+./scripts/build-client-from-source.sh
+```
+
+脚本默认运行测试并分别暂存到 `.dist/server/`、`.dist/client/`；可通过 `RUN_TESTS=0` 跳过测试。Arch Linux 本地包也可在普通用户下执行 `./scripts/build-arch-client-package.sh` 重新生成。
+
+每个 Release 附带 `SHA256SUMS`，tag 构建还生成 GitHub/Sigstore 构建证明：
+
+```bash
+sha256sum --check SHA256SUMS
+gh attestation verify RemoteClipboard-client-windows-x64.zip \
+  --repo ParadoxMoranis/RemoteClipboard
+```
 
 ## 快速验证
 
@@ -229,5 +269,6 @@ GUI 目录中的旧 `tcpserver.*` / `server_main.cpp` 以及服务器目录中�
 - v1 仍是单工作区广播兼容协议，不具备设备级授权或离线可靠投递。
 - 密码认证仅是 v0.1 bootstrap；生产身份、JWT 和设备证明属于 v0.2。
 - SQLite 当前只承担事件元数据，不提供用户可见历史 API。
-- Windows CI 已构建 GUI、两个服务端和全部测试，并生成带 Qt/MinGW 运行库的 x64 ZIP；正式发布仍需补充 SBOM、签名和许可证审查。
+- Windows CI 构建 GUI、两个服务端和全部测试；Release ZIP 只分发带完整 Qt/MinGW 运行库的 x64 客户端。
+- Release 提供校验和与 GitHub/Sigstore 构建证明；后续仍需补充 SBOM 和自动更新机制。
 - 仓库尚未声明许可证，公开分发前需完成依赖许可证审查并补充许可证。

@@ -174,14 +174,59 @@ endif()
 include(GNUInstallDirs)
 if(RC_BUILD_SERVERS)
     install(TARGETS remote_clipboard_server_64 remote_clipboard_server_512
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT Server)
+    install(FILES README.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}/server
+        COMPONENT Server)
 endif()
 if(RC_BUILD_CLI)
-    install(TARGETS remote_clipboard_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS remote_clipboard_cli
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT Client)
 endif()
 if(RC_BUILD_WAYLAND_GUI)
-    install(TARGETS remote_clipboard_linux_gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS remote_clipboard_linux_gui
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT Client)
 endif()
 if(RC_BUILD_WINDOWS_GUI)
-    install(TARGETS remote_clipboard_windows_gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS remote_clipboard_windows_gui
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT Client)
 endif()
+if(RC_BUILD_CLI OR RC_BUILD_WAYLAND_GUI OR RC_BUILD_WINDOWS_GUI)
+    install(FILES README.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}/client
+        COMPONENT Client)
+endif()
+
+set(CPACK_PACKAGE_NAME "remote-clipboard")
+set(CPACK_PACKAGE_VENDOR "Remote Clipboard contributors")
+set(CPACK_PACKAGE_CONTACT "ParadoxMoranis")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Secure cross-device clipboard synchronization")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/ParadoxMoranis/RemoteClipboard")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+set(CPACK_COMPONENTS_ALL Server Client)
+set(CPACK_COMPONENT_SERVER_DISPLAY_NAME "Remote Clipboard server")
+set(CPACK_COMPONENT_SERVER_DESCRIPTION "64 MiB and 512 MiB Remote Clipboard servers")
+set(CPACK_COMPONENT_CLIENT_DISPLAY_NAME "Remote Clipboard client")
+set(CPACK_COMPONENT_CLIENT_DESCRIPTION "Linux CLI and Qt Wayland client")
+
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ParadoxMoranis")
+set(CPACK_DEBIAN_PACKAGE_SECTION "net")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_SERVER_PACKAGE_NAME "remote-clipboard-server")
+set(CPACK_DEBIAN_CLIENT_PACKAGE_NAME "remote-clipboard-client")
+set(CPACK_DEBIAN_CLIENT_PACKAGE_DEPENDS "wl-clipboard")
+
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_PACKAGE_LICENSE "LicenseRef-Unspecified")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Internet")
+set(CPACK_RPM_SERVER_PACKAGE_NAME "remote-clipboard-server")
+set(CPACK_RPM_CLIENT_PACKAGE_NAME "remote-clipboard-client")
+set(CPACK_RPM_CLIENT_PACKAGE_REQUIRES "wl-clipboard")
+
+include(CPack)

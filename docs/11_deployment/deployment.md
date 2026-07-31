@@ -1,5 +1,9 @@
 # 部署与运行设计
 
+## Implementation Status
+
+v0.1 发布流水线已提供拆分的服务端/客户端 DEB 与 RPM、Arch Linux 本地客户端包、Windows x64 客户端 ZIP 和带独立源码构建脚本的统一源码 ZIP。Linux systemd sandbox、容器镜像、反向代理、健康检查和备份编排尚未实现，安装原生包后仍需由管理员显式配置并启动服务端。
+
 ## Purpose
 
 规定开发、单节点生产和扩展部署方式、配置来源、备份恢复及运行健康标准。

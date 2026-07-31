@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SUDO[@]}" pacman -Sy --needed --noconfirm \
   base-devel \
   cmake \
+  ninja \
   qt6-base \
   nlohmann-json \
   openssl \

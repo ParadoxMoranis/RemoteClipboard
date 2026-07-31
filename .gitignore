@@ -1,5 +1,6 @@
 build/
 .build-linux/
+.build-*/
 .dist/
 received_files/
 *.sqlite

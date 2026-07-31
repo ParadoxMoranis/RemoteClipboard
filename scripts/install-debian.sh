@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SUDO[@]}" apt-get install -y \
   build-essential \
   cmake \
+  ninja-build \
   qt6-base-dev \
   qt6-tools-dev-tools \
   nlohmann-json3-dev \
