@@ -55,7 +55,9 @@ jobs:
           done
           test -f "artifacts/remote-clipboard-server_${RC_VERSION}_amd64.deb"
           test -f "artifacts/remote-clipboard-client_${RC_VERSION}_amd64.deb"
-          dpkg-deb --info artifacts/*.deb
+          for package in artifacts/*.deb; do
+            dpkg-deb --info "$package"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: release-debian
