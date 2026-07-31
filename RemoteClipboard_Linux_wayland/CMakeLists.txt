@@ -15,11 +15,18 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS
     Network
     Core
 )
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS 
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS
     Widgets
     Network
     Core
 )
+find_package(nlohmann_json 3.2.0 REQUIRED)
+
+add_library(remote_clipboard_protocol STATIC
+    ../client_common/protocol.cpp
+)
+target_include_directories(remote_clipboard_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(remote_clipboard_protocol PUBLIC nlohmann_json::nlohmann_json)
 
 set(PROJECT_SOURCES
     main.cpp
@@ -36,8 +43,6 @@ set(PROJECT_SOURCES
     clipboardmonitor.cpp
     tcpclient.h
     tcpclient.cpp
-    tcpserver.h
-    tcpserver.cpp
 )
 
 add_executable(RemotePostboard
@@ -45,6 +50,7 @@ add_executable(RemotePostboard
 )
 
 target_link_libraries(RemotePostboard PRIVATE
+    remote_clipboard_protocol
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
     Qt${QT_VERSION_MAJOR}::Core

@@ -3,11 +3,12 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QUuid>
 
 namespace {
-constexpr int kConfigVersion = 1;
+constexpr int kConfigVersion = 2;
 constexpr auto kOrgName = "RemoteClipboard";
 }
 
@@ -128,15 +129,21 @@ bool GuiConfigStore::save(const GuiAppConfig& config, QString* errorMessage) con
     root.insert(QStringLiteral("show_window_shortcut"), config.showWindowShortcut.toString(QKeySequence::PortableText));
     root.insert(QStringLiteral("switch_profile_shortcut"), config.switchProfileShortcut.toString(QKeySequence::PortableText));
 
-    QFile file(configPath());
+    QSaveFile file(configPath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Unable to write config file: %1").arg(file.fileName());
+            *errorMessage = QStringLiteral("Unable to write config file: %1").arg(file.errorString());
         }
         return false;
     }
 
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0 || !file.commit()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Unable to atomically save config file: %1").arg(file.errorString());
+        }
+        return false;
+    }
+    QFile::setPermissions(configPath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
 
@@ -147,10 +154,8 @@ ConnectionProfile GuiConfigStore::defaultProfile()
     profile.name = QStringLiteral("Default");
     profile.host = QStringLiteral("127.0.0.1");
     profile.port = 8080;
-    profile.username = QStringLiteral("admin");
-    profile.password = QStringLiteral("admin");
-    profile.useTls = false;
-    profile.allowInsecureTls = true;
+    profile.useTls = true;
+    profile.allowInsecureTls = false;
     return profile;
 }
 
@@ -166,11 +171,13 @@ ConnectionProfile GuiConfigStore::profileFromJson(const QJsonObject& object)
     profile.name = object.value(QStringLiteral("name")).toString();
     profile.host = object.value(QStringLiteral("host")).toString(QStringLiteral("127.0.0.1"));
     profile.port = static_cast<quint16>(object.value(QStringLiteral("port")).toInt(8080));
-    profile.username = object.value(QStringLiteral("username")).toString(QStringLiteral("admin"));
-    profile.password = object.value(QStringLiteral("password")).toString(QStringLiteral("admin"));
-    profile.useTls = object.value(QStringLiteral("use_tls")).toBool(false);
+    profile.username = object.value(QStringLiteral("username")).toString();
+    profile.password = object.value(QStringLiteral("password")).toString();
+    profile.useTls = object.value(QStringLiteral("use_tls")).toBool(true);
     profile.caCertificatePath = object.value(QStringLiteral("ca_certificate")).toString();
-    profile.allowInsecureTls = object.value(QStringLiteral("allow_insecure_tls")).toBool(true);
+    profile.developmentProfile = object.value(QStringLiteral("development_profile")).toBool(false);
+    profile.allowInsecureTls = profile.developmentProfile &&
+        object.value(QStringLiteral("allow_insecure_tls")).toBool(false);
     return profile;
 }
 
@@ -182,10 +189,11 @@ QJsonObject GuiConfigStore::profileToJson(const ConnectionProfile& profile)
     object.insert(QStringLiteral("host"), profile.host);
     object.insert(QStringLiteral("port"), static_cast<int>(profile.port));
     object.insert(QStringLiteral("username"), profile.username);
-    object.insert(QStringLiteral("password"), profile.password);
     object.insert(QStringLiteral("use_tls"), profile.useTls);
     object.insert(QStringLiteral("ca_certificate"), profile.caCertificatePath);
-    object.insert(QStringLiteral("allow_insecure_tls"), profile.allowInsecureTls);
+    object.insert(QStringLiteral("development_profile"), profile.developmentProfile);
+    object.insert(QStringLiteral("allow_insecure_tls"),
+        profile.developmentProfile && profile.allowInsecureTls);
     return object;
 }
 

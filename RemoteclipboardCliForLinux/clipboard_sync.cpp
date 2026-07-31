@@ -1,5 +1,7 @@
 #include "../cli_common/config.h"
+#include "../client_common/protocol.h"
 #include "../server_common/filetransfer.h"
+#include "../server_common/parseutils.h"
 
 #include <array>
 #include <atomic>
@@ -15,6 +17,7 @@
 #include <netdb.h>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -147,11 +150,12 @@ void printHelp()
         << "  --host <host>             Server address (default: 127.0.0.1)\n"
         << "  --port <port>             Server port (default: 8080)\n"
         << "  --username <name>         Authentication username (default: admin)\n"
-        << "  --password <password>     Authentication password (default: admin)\n"
+        << "  --password-file <path>    Authentication secret file\n"
         << "  --receive-dir <path>      Directory for received files\n"
         << "  --tls                     Enable TLS\n"
         << "  --tls-ca <path>           Optional CA certificate for TLS\n"
-        << "  --strict-tls              Verify the peer certificate instead of allowing self-signed certs\n"
+        << "  --development             Explicitly allow a plaintext development profile\n"
+        << "  --insecure-tls            Ignore certificate errors; requires --development\n"
         << "  -h, --help                Show this help message\n";
 }
 
@@ -170,7 +174,7 @@ CliAppConfig parseArgs(int argc, char* argv[])
             continue;
         }
         if (arg == "--port" && index + 1 < argc) {
-            config.port = static_cast<uint16_t>(std::stoi(argv[++index]));
+            config.port = parsePortArg(argv[++index], "--port");
             continue;
         }
         if (arg == "--username" && index + 1 < argc) {
@@ -179,6 +183,11 @@ CliAppConfig parseArgs(int argc, char* argv[])
         }
         if (arg == "--password" && index + 1 < argc) {
             config.password = argv[++index];
+            config.passwordFromCommandLine = true;
+            continue;
+        }
+        if (arg == "--password-file" && index + 1 < argc) {
+            config.passwordSecretFile = argv[++index];
             continue;
         }
         if (arg == "--receive-dir" && index + 1 < argc) {
@@ -193,10 +202,16 @@ CliAppConfig parseArgs(int argc, char* argv[])
             config.tlsCaFile = argv[++index];
             continue;
         }
-        if (arg == "--strict-tls") {
-            config.allowInsecureTls = false;
+        if (arg == "--development") {
+            config.developmentMode = true;
+            config.tlsEnabled = false;
             continue;
         }
+        if (arg == "--insecure-tls") {
+            config.allowInsecureTls = true;
+            continue;
+        }
+        throw std::invalid_argument("Unknown or incomplete option: " + arg);
     }
 
     return config;
@@ -340,6 +355,11 @@ public:
                 close();
                 return false;
             }
+            if (SSL_CTX_set_min_proto_version(context_, TLS1_3_VERSION) != 1) {
+                std::cerr << "Failed to require TLS 1.3" << std::endl;
+                close();
+                return false;
+            }
 
             if (!config_.tlsCaFile.empty()) {
                 if (SSL_CTX_load_verify_locations(context_, config_.tlsCaFile.c_str(), nullptr) != 1) {
@@ -347,6 +367,10 @@ public:
                     close();
                     return false;
                 }
+            } else if (!config_.allowInsecureTls && SSL_CTX_set_default_verify_paths(context_) != 1) {
+                std::cerr << "Failed to load the system CA trust store" << std::endl;
+                close();
+                return false;
             }
 
             SSL_CTX_set_verify(context_,
@@ -354,6 +378,13 @@ public:
                 nullptr);
 
             ssl_ = SSL_new(context_);
+            if (ssl_ == nullptr ||
+                SSL_set_tlsext_host_name(ssl_, config_.host.c_str()) != 1 ||
+                (!config_.allowInsecureTls && SSL_set1_host(ssl_, config_.host.c_str()) != 1)) {
+                std::cerr << "Failed to configure TLS peer verification" << std::endl;
+                close();
+                return false;
+            }
             SSL_set_fd(ssl_, socket_);
             if (SSL_connect(ssl_) != 1) {
                 std::cerr << "TLS handshake failed" << std::endl;
@@ -367,11 +398,7 @@ public:
         awaitingPong_ = false;
         authenticationRejected_ = false;
         lastHeartbeatSentAt_ = std::chrono::steady_clock::time_point{};
-        return sendJson(json{
-            {"type", "auth"},
-            {"username", config_.username},
-            {"password", config_.password}
-        });
+        return sendJson(remoteclipboard::v1::makeAuth(config_.username, config_.password));
     }
 
     void close()
@@ -435,13 +462,10 @@ public:
                 std::chrono::steady_clock::now().time_since_epoch().count())
                 + "-" + path.filename().string();
 
-            json start = {
-                {"type", "file_transfer_start"},
-                {"transfer_id", transferId},
-                {"name", path.filename().string()},
-                {"size", static_cast<std::uint64_t>(std::filesystem::file_size(path))},
-                {"sha256", filetransfer::sha256HexForFile(path)}
-            };
+            json start = remoteclipboard::v1::makeTransferStart(transferId,
+                path.filename().string(),
+                static_cast<std::uint64_t>(std::filesystem::file_size(path)),
+                filetransfer::sha256HexForFile(path));
             if (!sendJson(start)) {
                 return false;
             }
@@ -456,22 +480,14 @@ public:
                     break;
                 }
                 std::vector<unsigned char> chunk(buffer.begin(), buffer.begin() + count);
-                json chunkMessage = {
-                    {"type", "file_transfer_chunk"},
-                    {"transfer_id", transferId},
-                    {"seq", sequence++},
-                    {"data", filetransfer::encodeBase64(chunk)}
-                };
+                json chunkMessage = remoteclipboard::v1::makeTransferChunk(
+                    transferId, sequence++, filetransfer::encodeBase64(chunk));
                 if (!sendJson(chunkMessage)) {
                     return false;
                 }
             }
 
-            if (!sendJson(json{
-                    {"type", "file_transfer_complete"},
-                    {"transfer_id", transferId},
-                    {"chunk_size", static_cast<std::uint64_t>(filetransfer::kChunkSizeBytes)}
-                })) {
+            if (!sendJson(remoteclipboard::v1::makeTransferComplete(transferId))) {
                 return false;
             }
         }
@@ -718,17 +734,61 @@ CliAppConfig prepareConfig(int argc, char* argv[])
 
     config.host = argsConfig.host != "127.0.0.1" ? argsConfig.host : config.host;
     config.port = argsConfig.port != 8080 ? argsConfig.port : config.port;
-    config.username = argsConfig.username != "admin" ? argsConfig.username : config.username;
-    config.password = argsConfig.password != "admin" ? argsConfig.password : config.password;
+    if (!argsConfig.username.empty()) {
+        config.username = argsConfig.username;
+    }
+    if (!argsConfig.password.empty()) {
+        config.password = argsConfig.password;
+        config.passwordFromCommandLine = argsConfig.passwordFromCommandLine;
+    }
+    if (!argsConfig.passwordSecretFile.empty()) {
+        config.passwordSecretFile = argsConfig.passwordSecretFile;
+    }
     if (!argsConfig.receiveDir.empty()) {
         config.receiveDir = argsConfig.receiveDir;
     }
-    config.tlsEnabled = argsConfig.tlsEnabled || config.tlsEnabled;
+    if (argsConfig.developmentMode) {
+        config.developmentMode = true;
+        config.tlsEnabled = false;
+    } else {
+        config.tlsEnabled = argsConfig.tlsEnabled || config.tlsEnabled;
+    }
     if (!argsConfig.tlsCaFile.empty()) {
         config.tlsCaFile = argsConfig.tlsCaFile;
     }
-    if (!argsConfig.allowInsecureTls) {
-        config.allowInsecureTls = false;
+    if (argsConfig.allowInsecureTls) {
+        config.allowInsecureTls = true;
+    }
+
+    if (!config.passwordSecretFile.empty()) {
+        std::ifstream secretInput(config.passwordSecretFile);
+        if (!secretInput || !std::getline(secretInput, config.password)) {
+            throw std::runtime_error("Unable to read password secret file");
+        }
+        config.password = trim(config.password);
+    } else if (const char* secret = std::getenv("REMOTE_CLIPBOARD_PASSWORD")) {
+        config.password = secret;
+    }
+    if (!config.developmentMode && !config.tlsEnabled) {
+        throw std::runtime_error("Plaintext transport requires --development");
+    }
+    if (config.allowInsecureTls && !config.developmentMode) {
+        throw std::runtime_error("Ignoring TLS certificate errors requires --development");
+    }
+    if (config.passwordFromCommandLine && !config.developmentMode) {
+        throw std::runtime_error(
+            "--password is only accepted with --development; use --password-file in production");
+    }
+    if (config.developmentMode) {
+        if (config.username.empty()) {
+            config.username = "admin";
+        }
+        if (config.password.empty()) {
+            config.password = "admin";
+        }
+    }
+    if (config.username.empty() || config.password.empty()) {
+        throw std::runtime_error("Username and password secret are required");
     }
 
     while (config.receiveDir.empty()) {
@@ -761,7 +821,13 @@ int main(int argc, char* argv[])
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    CliAppConfig config = prepareConfig(argc, argv);
+    CliAppConfig config;
+    try {
+        config = prepareConfig(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "Configuration error: " << error.what() << std::endl;
+        return 1;
+    }
     std::filesystem::create_directories(config.receiveDir);
 
     ClientConnection connection(config);

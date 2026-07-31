@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-format \
+            libssl-dev \
+            libsqlite3-dev \
+            ninja-build \
+            nlohmann-json3-dev \
+            qt6-base-dev
+      - name: Check formatting
+        run: bash scripts/check-format.sh
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRC_BUILD_WINDOWS_GUI=OFF
+          -DRC_STATIC_GNU_RUNTIMES=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-sqlite3
+      - name: Configure
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRC_BUILD_CLI=OFF
+          -DRC_BUILD_WAYLAND_GUI=OFF
+          -DRC_BUILD_WINDOWS_GUI=ON
+          -DRC_STATIC_GNU_RUNTIMES=OFF
+      - name: Build Windows targets
+        shell: msys2 {0}
+        run: cmake --build build
+      - name: Test
+        shell: msys2 {0}
+        run: ctest --test-dir build --output-on-failure
+      - name: Stage Windows package
+        shell: msys2 {0}
+        run: |
+          package_root="$PWD/dist/RemoteClipboard-windows-x64"
+          cmake --install build --prefix "$package_root"
+          windeployqt6 --release --no-translations --compiler-runtime \
+            "$package_root/bin/remote-clipboard-windows.exe"
+
+          for package in \
+            mingw-w64-ucrt-x86_64-gcc-libs \
+            mingw-w64-ucrt-x86_64-openssl \
+            mingw-w64-ucrt-x86_64-sqlite3; do
+            while IFS= read -r runtime; do
+              cp -n "$runtime" "$package_root/bin/"
+            done < <(pacman -Qql "$package" | grep -E '^/ucrt64/bin/[^/]+\.dll$')
+          done
+
+          cd "$PWD/dist"
+          cmake -E tar cf "RemoteClipboard-windows-x64.zip" \
+            --format=zip -- "RemoteClipboard-windows-x64"
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteClipboard-windows-x64
+          path: dist/RemoteClipboard-windows-x64.zip
+          if-no-files-found: error

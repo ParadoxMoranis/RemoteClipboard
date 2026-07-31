@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   qt6-tools-dev-tools \
   nlohmann-json3-dev \
   libssl-dev \
+  libsqlite3-dev \
   wl-clipboard
 
 build_and_install_all

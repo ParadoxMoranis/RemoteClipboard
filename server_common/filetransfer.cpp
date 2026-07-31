@@ -14,11 +14,22 @@ namespace filetransfer {
 
 std::string sanitizeFileName(const std::string& fileName)
 {
-    std::string sanitized = fileName.empty() ? "clipboard-file" : fileName;
-    std::replace_if(sanitized.begin(), sanitized.end(), [](char value) {
-        return value == '/' || value == '\\' || value == ':' || value == '*' ||
-            value == '?' || value == '"' || value == '<' || value == '>' || value == '|';
-    }, '_');
+    std::string sanitized = std::filesystem::path(fileName).filename().string();
+    if (sanitized.empty() || sanitized == "." || sanitized == "..") {
+        sanitized = "clipboard-file";
+    }
+    std::replace_if(
+        sanitized.begin(), sanitized.end(),
+        [](char value) {
+            const auto byte = static_cast<unsigned char>(value);
+            return byte < 0x20 || value == '/' || value == '\\' || value == ':' || value == '*' ||
+                   value == '?' || value == '"' || value == '<' || value == '>' || value == '|';
+        },
+        '_');
+    constexpr std::size_t kMaxFileNameBytes = 240;
+    if (sanitized.size() > kMaxFileNameBytes) {
+        sanitized.resize(kMaxFileNameBytes);
+    }
     return sanitized;
 }
 
@@ -26,7 +37,7 @@ std::string currentTimestamp()
 {
     const auto now = std::chrono::system_clock::now();
     const std::time_t raw = std::chrono::system_clock::to_time_t(now);
-    std::tm tm {};
+    std::tm tm{};
 #ifdef _WIN32
     localtime_s(&tm, &raw);
 #else
@@ -47,7 +58,8 @@ std::filesystem::path makeFilePathUnique(const std::filesystem::path& requestedP
     const auto stem = requestedPath.stem().string();
     const auto extension = requestedPath.extension().string();
     for (int index = 1; index < 10000; ++index) {
-        const auto candidate = requestedPath.parent_path() / (stem + "-" + std::to_string(index) + extension);
+        const auto candidate =
+            requestedPath.parent_path() / (stem + "-" + std::to_string(index) + extension);
         if (!std::filesystem::exists(candidate)) {
             return candidate;
         }
@@ -71,11 +83,31 @@ bool decodeBase64(const std::string& input, std::vector<unsigned char>& output)
         return true;
     }
 
-    output.assign((compact.size() * 3) / 4 + 4, 0);
-    const int decodedLength = EVP_DecodeBlock(
-        output.data(),
-        reinterpret_cast<const unsigned char*>(compact.data()),
-        static_cast<int>(compact.size()));
+    if (compact.size() % 4 != 0) {
+        output.clear();
+        return false;
+    }
+    std::size_t padding = 0;
+    if (compact.back() == '=') {
+        ++padding;
+    }
+    if (compact.size() > 1 && compact[compact.size() - 2] == '=') {
+        ++padding;
+    }
+    for (std::size_t index = 0; index < compact.size(); ++index) {
+        const unsigned char value = static_cast<unsigned char>(compact[index]);
+        const bool alphabet = std::isalnum(value) || value == '+' || value == '/';
+        const bool validPadding = value == '=' && index >= compact.size() - padding;
+        if (!alphabet && !validPadding) {
+            output.clear();
+            return false;
+        }
+    }
+
+    output.assign((compact.size() / 4) * 3, 0);
+    const int decodedLength =
+        EVP_DecodeBlock(output.data(), reinterpret_cast<const unsigned char*>(compact.data()),
+                        static_cast<int>(compact.size()));
     if (decodedLength < 0) {
         output.clear();
         return false;
@@ -99,10 +131,8 @@ std::string encodeBase64(const std::vector<unsigned char>& input)
     }
 
     std::string output(((input.size() + 2) / 3) * 4, '\0');
-    const int encodedLength = EVP_EncodeBlock(
-        reinterpret_cast<unsigned char*>(output.data()),
-        input.data(),
-        static_cast<int>(input.size()));
+    const int encodedLength = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(output.data()),
+                                              input.data(), static_cast<int>(input.size()));
     output.resize(static_cast<std::size_t>(encodedLength));
     return output;
 }
@@ -173,6 +203,13 @@ bool ensureDirectory(const std::filesystem::path& directory)
     } catch (...) {
         return false;
     }
+}
+
+bool isValidSha256(const std::string& value)
+{
+    return value.size() == SHA256_DIGEST_LENGTH * 2 &&
+           std::all_of(value.begin(), value.end(),
+                       [](unsigned char character) { return std::isxdigit(character) != 0; });
 }
 
 } // namespace filetransfer
