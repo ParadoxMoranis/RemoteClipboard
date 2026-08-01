@@ -1,17 +1,21 @@
 #include "settingsdialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -19,18 +23,45 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
     : QDialog(parent)
     , config_(config)
 {
-    setWindowTitle(tr("Settings"));
-    resize(840, 560);
+    setObjectName(QStringLiteral("settingsDialog"));
+    setWindowTitle(tr("Remote Clipboard // Settings"));
+    setMinimumSize(620, 560);
+    resize(660, 700);
 
     auto* rootLayout = new QVBoxLayout(this);
-    auto* contentLayout = new QHBoxLayout();
+    rootLayout->setContentsMargins(18, 18, 18, 18);
+    rootLayout->setSpacing(14);
 
-    auto* profileGroup = new QGroupBox(tr("Server Profiles"), this);
+    auto* dialogHero = new QFrame(this);
+    dialogHero->setObjectName(QStringLiteral("heroPanel"));
+    auto* dialogHeroLayout = new QVBoxLayout(dialogHero);
+    dialogHeroLayout->setContentsMargins(18, 14, 18, 14);
+    dialogHeroLayout->setSpacing(5);
+    auto* dialogEyebrow = new QLabel(tr("CONFIGURATION // WORKSPACE"), dialogHero);
+    dialogEyebrow->setObjectName(QStringLiteral("brandEyebrowLabel"));
+    dialogEyebrow->setAlignment(Qt::AlignLeft);
+    auto* dialogTitle = new QLabel(tr("CLIENT / SETTINGS"), dialogHero);
+    dialogTitle->setObjectName(QStringLiteral("brandTitleLabel"));
+    auto* dialogCaption = new QLabel(tr("PROFILES · STARTUP · SHORTCUTS · TRANSPORT SECURITY"), dialogHero);
+    dialogCaption->setObjectName(QStringLiteral("brandCaptionLabel"));
+    dialogHeroLayout->addWidget(dialogEyebrow, 0, Qt::AlignLeft);
+    dialogHeroLayout->addWidget(dialogTitle);
+    dialogHeroLayout->addWidget(dialogCaption);
+    rootLayout->addWidget(dialogHero);
+
+    auto* contentLayout = new QHBoxLayout();
+    contentLayout->setSpacing(14);
+
+    auto* profileGroup = new QGroupBox(tr("SERVER PROFILES // LIST"), this);
+    profileGroup->setMinimumWidth(190);
     auto* profileLayout = new QVBoxLayout(profileGroup);
     profileList_ = new QListWidget(profileGroup);
     auto* profileButtonLayout = new QHBoxLayout();
     auto* addProfileButton = new QPushButton(tr("Add"), profileGroup);
     auto* removeProfileButton = new QPushButton(tr("Remove"), profileGroup);
+    addProfileButton->setText(tr("ADD"));
+    removeProfileButton->setText(tr("REMOVE"));
+    removeProfileButton->setProperty("buttonRole", QStringLiteral("danger"));
     profileButtonLayout->addWidget(addProfileButton);
     profileButtonLayout->addWidget(removeProfileButton);
     profileLayout->addWidget(profileList_);
@@ -38,9 +69,13 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
 
     auto* editorContainer = new QWidget(this);
     auto* editorLayout = new QVBoxLayout(editorContainer);
+    editorLayout->setContentsMargins(0, 0, 0, 0);
+    editorLayout->setSpacing(14);
 
-    auto* connectionGroup = new QGroupBox(tr("Profile Details"), editorContainer);
+    auto* connectionGroup = new QGroupBox(tr("PROFILE // DETAILS"), editorContainer);
     auto* connectionForm = new QFormLayout(connectionGroup);
+    connectionForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    connectionForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
     profileNameEdit_ = new QLineEdit(connectionGroup);
     hostEdit_ = new QLineEdit(connectionGroup);
     portSpinBox_ = new QSpinBox(connectionGroup);
@@ -52,6 +87,8 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
     caCertificateEdit_ = new QLineEdit(connectionGroup);
     auto* caBrowseButton = new QPushButton(tr("Browse"), connectionGroup);
     auto* caLayout = new QHBoxLayout();
+    caLayout->setContentsMargins(0, 0, 0, 0);
+    caLayout->setSpacing(8);
     caLayout->addWidget(caCertificateEdit_);
     caLayout->addWidget(caBrowseButton);
     auto* caContainer = new QWidget(connectionGroup);
@@ -65,20 +102,28 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
     connectionForm->addRow(QString(), useTlsCheckBox_);
     connectionForm->addRow(tr("CA Certificate"), caContainer);
 
-    auto* appGroup = new QGroupBox(tr("Client Settings"), editorContainer);
+    auto* appGroup = new QGroupBox(tr("CLIENT // BEHAVIOR"), editorContainer);
     auto* appForm = new QFormLayout(appGroup);
+    appForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    appForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
     receiveDirectoryEdit_ = new QLineEdit(appGroup);
     auto* receiveBrowseButton = new QPushButton(tr("Browse"), appGroup);
     auto* receiveLayout = new QHBoxLayout();
+    receiveLayout->setContentsMargins(0, 0, 0, 0);
+    receiveLayout->setSpacing(8);
     receiveLayout->addWidget(receiveDirectoryEdit_);
     receiveLayout->addWidget(receiveBrowseButton);
     auto* receiveContainer = new QWidget(appGroup);
     receiveContainer->setLayout(receiveLayout);
+    languageComboBox_ = new QComboBox(appGroup);
+    languageComboBox_->addItem(QStringLiteral("English"), QStringLiteral("en"));
+    languageComboBox_->addItem(QStringLiteral("简体中文"), QStringLiteral("zh_CN"));
     autoStartCheckBox_ = new QCheckBox(tr("Launch on system startup"), appGroup);
-    autoConnectCheckBox_ = new QCheckBox(tr("Use last successful connection when auto-started"), appGroup);
+    autoConnectCheckBox_ = new QCheckBox(tr("Auto-connect last profile on startup"), appGroup);
     showWindowShortcutEdit_ = new QKeySequenceEdit(appGroup);
     switchProfileShortcutEdit_ = new QKeySequenceEdit(appGroup);
 
+    appForm->addRow(tr("Language"), languageComboBox_);
     appForm->addRow(tr("Receive Directory"), receiveContainer);
     appForm->addRow(QString(), autoStartCheckBox_);
     appForm->addRow(QString(), autoConnectCheckBox_);
@@ -89,14 +134,27 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
     editorLayout->addWidget(appGroup);
     editorLayout->addStretch(1);
 
+    auto* editorScrollArea = new QScrollArea(this);
+    editorScrollArea->setObjectName(QStringLiteral("settingsScrollArea"));
+    editorScrollArea->setWidgetResizable(true);
+    editorScrollArea->setFrameShape(QFrame::NoFrame);
+    editorScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    editorScrollArea->setWidget(editorContainer);
+
     contentLayout->addWidget(profileGroup, 1);
-    contentLayout->addWidget(editorContainer, 2);
+    contentLayout->addWidget(editorScrollArea, 2);
 
     auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    buttonBox->button(QDialogButtonBox::Ok)->setText(tr("SAVE // APPLY"));
+    buttonBox->button(QDialogButtonBox::Cancel)->setText(tr("CANCEL"));
+    buttonBox->button(QDialogButtonBox::Ok)->setIcon(QIcon());
+    buttonBox->button(QDialogButtonBox::Cancel)->setIcon(QIcon());
     rootLayout->addLayout(contentLayout);
     rootLayout->addWidget(buttonBox);
 
     receiveDirectoryEdit_->setText(config_.receiveDirectory);
+    const int languageIndex = languageComboBox_->findData(config_.language);
+    languageComboBox_->setCurrentIndex(languageIndex >= 0 ? languageIndex : 0);
     autoStartCheckBox_->setChecked(config_.autoStartEnabled);
     autoConnectCheckBox_->setChecked(config_.autoConnectLastProfile);
     showWindowShortcutEdit_->setKeySequence(config_.showWindowShortcut);
@@ -113,6 +171,7 @@ SettingsDialog::SettingsDialog(const GuiAppConfig& config, QWidget* parent)
     connect(buttonBox, &QDialogButtonBox::accepted, this, [this]() {
         saveEditorToProfile(profileList_->currentRow());
         config_.receiveDirectory = receiveDirectoryEdit_->text().trimmed();
+        config_.language = languageComboBox_->currentData().toString();
         config_.autoStartEnabled = autoStartCheckBox_->isChecked();
         config_.autoConnectLastProfile = autoConnectCheckBox_->isChecked();
         config_.showWindowShortcut = showWindowShortcutEdit_->keySequence();
@@ -169,6 +228,8 @@ void SettingsDialog::ensureProfileSelection()
     }
 
     profileList_->setCurrentRow(selectedIndex);
+    lastProfileIndex_ = selectedIndex;
+    loadProfileToEditor(selectedIndex);
 }
 
 void SettingsDialog::loadProfileToEditor(int index)

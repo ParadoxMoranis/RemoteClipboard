@@ -26,6 +26,8 @@ struct GuiAppConfig {
     QString receiveDirectory;
     bool autoStartEnabled = false;
     bool autoConnectLastProfile = true;
+    QString colorScheme = QStringLiteral("light");
+    QString language = QStringLiteral("en");
     QKeySequence showWindowShortcut;
     QKeySequence switchProfileShortcut;
 };

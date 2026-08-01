@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  RC_VERSION: 0.1.0
+  RC_VERSION: 0.2.0
 
 jobs:
   debian-packages:
@@ -231,4 +231,4 @@ jobs:
           --repo "$GITHUB_REPOSITORY"
           --verify-tag
           --title "Remote Clipboard ${GITHUB_REF_NAME}"
-          --notes-file docs/release-notes/v0.1.0.md
+          --notes-file docs/release-notes/v0.2.0.md

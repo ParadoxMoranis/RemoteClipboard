@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(RemoteClipboard VERSION 0.1.0 LANGUAGES CXX)
+project(RemoteClipboard VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,7 @@ if(RC_BUILD_WAYLAND_GUI OR RC_BUILD_WINDOWS_GUI)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
+    set(CMAKE_AUTOUIC_SEARCH_PATHS ${CMAKE_CURRENT_SOURCE_DIR}/gui_common)
     find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Core)
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Core)
 
@@ -111,8 +112,13 @@ if(RC_BUILD_WAYLAND_GUI OR RC_BUILD_WINDOWS_GUI)
         gui_common/autostartmanager.h
         gui_common/clientconfig.cpp
         gui_common/clientconfig.h
+        gui_common/mainwindow.ui
         gui_common/settingsdialog.cpp
         gui_common/settingsdialog.h
+        gui_common/uilanguage.cpp
+        gui_common/uilanguage.h
+        gui_common/uitheme.cpp
+        gui_common/uitheme.h
     )
 endif()
 
@@ -124,7 +130,6 @@ if(RC_BUILD_WAYLAND_GUI)
         RemoteClipboard_Linux_wayland/main.cpp
         RemoteClipboard_Linux_wayland/mainwindow.cpp
         RemoteClipboard_Linux_wayland/mainwindow.h
-        RemoteClipboard_Linux_wayland/mainwindow.ui
         RemoteClipboard_Linux_wayland/clipboardmonitor.cpp
         RemoteClipboard_Linux_wayland/clipboardmonitor.h
         RemoteClipboard_Linux_wayland/tcpclient.cpp
@@ -149,7 +154,6 @@ if(RC_BUILD_WINDOWS_GUI)
         RemoteClipboardWindows/main.cpp
         RemoteClipboardWindows/mainwindow.cpp
         RemoteClipboardWindows/mainwindow.h
-        RemoteClipboardWindows/mainwindow.ui
         RemoteClipboardWindows/clipboardmonitor.cpp
         RemoteClipboardWindows/clipboardmonitor.h
         RemoteClipboardWindows/tcpclient.cpp

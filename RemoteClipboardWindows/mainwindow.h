@@ -19,6 +19,7 @@ class ClipboardMonitor;
 class QCheckBox;
 class QComboBox;
 class QFile;
+class QLabel;
 class QLineEdit;
 class QPushButton;
 class QCloseEvent;
@@ -54,6 +55,7 @@ private slots:
     void hideToTray();
     void switchToNextProfile();
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
+    void onToggleColorScheme();
 
 private:
     struct IncomingChunkTransfer {
@@ -83,6 +85,9 @@ private:
     void applyAutoStart();
     void updateStatus(const QString &message);
     void updateConnectButton();
+    void applyLanguage();
+    void applyColorScheme();
+    void setConnectionState(const QString& label, const QString& state);
     QString defaultReceiveDirectory() const;
     QString receiveDirectory() const;
     bool ensureReceiveDirectoryReady();
@@ -107,6 +112,8 @@ private:
     QPushButton* settingsButton;
     QPushButton* hideButton;
     QComboBox* profileComboBox;
+    QPushButton* themeButton;
+    QLabel* connectionStatusLabel;
     QSystemTrayIcon* trayIcon;
     QShortcut* showWindowShortcut;
     QShortcut* switchProfileShortcut;
