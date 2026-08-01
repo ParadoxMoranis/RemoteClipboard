@@ -298,6 +298,20 @@ int main()
                      "CHECKSUM_MISMATCH");
         RC_EXPECT(test, !receiveJson(second, 200ms).has_value());
 
+        const std::vector<unsigned char> smallFile = {'s', 'm', 'a', 'l', 'l',
+                                                      '-', 'f', 'i', 'l', 'e'};
+        const std::string smallFileHash = filetransfer::sha256Hex(smallFile);
+        const Json validBundle = {
+            {"type", remoteclipboard::v1::type::kFileBundle},
+            {"files", Json::array({Json{{"name", "../small.txt"},
+                                        {"size", smallFile.size()},
+                                        {"sha256", smallFileHash},
+                                        {"data", "c21hbGwtZmlsZQ=="}}})},
+        };
+        RC_EXPECT(test, sendJson(first, validBundle));
+        RC_EXPECT_EQ(test, receiveJson(second).value_or(Json::object()).value("type", ""),
+                     remoteclipboard::v1::type::kFileBundle);
+
         const std::vector<unsigned char> abc = {'a', 'b', 'c'};
         const std::string abcHash = filetransfer::sha256Hex(abc);
         RC_EXPECT(test, sendJson(first, remoteclipboard::v1::makeTransferStart(
@@ -326,12 +340,28 @@ int main()
                      remoteclipboard::v1::type::kTransferComplete);
 
         bool foundCommittedFile = false;
+        bool foundSmallFile = false;
+        std::filesystem::path committedFilePath;
+        std::filesystem::path smallFilePath;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(storageDirectory)) {
             if (entry.is_regular_file() && entry.path().filename() == "safe.txt") {
                 foundCommittedFile = true;
+                committedFilePath = entry.path();
+            } else if (entry.is_regular_file() && entry.path().filename() == "small.txt") {
+                foundSmallFile = true;
+                smallFilePath = entry.path();
             }
         }
         RC_EXPECT(test, foundCommittedFile);
+        if (foundCommittedFile) {
+            RC_EXPECT_EQ(test, filetransfer::sha256HexForFile(committedFilePath), abcHash);
+            RC_EXPECT_EQ(test, std::filesystem::file_size(committedFilePath), abc.size());
+        }
+        RC_EXPECT(test, foundSmallFile);
+        if (foundSmallFile) {
+            RC_EXPECT_EQ(test, filetransfer::sha256HexForFile(smallFilePath), smallFileHash);
+            RC_EXPECT_EQ(test, std::filesystem::file_size(smallFilePath), smallFile.size());
+        }
 
         TestSocket oversizedWithNewline = connectClient(server.boundPort());
         RC_EXPECT(test, authenticate(oversizedWithNewline));

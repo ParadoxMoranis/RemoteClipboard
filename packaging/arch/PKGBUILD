@@ -1,5 +1,5 @@
 pkgname=remote-clipboard-client
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Qt Wayland and CLI clients for Remote Clipboard"
 arch=('x86_64')

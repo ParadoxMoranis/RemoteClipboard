@@ -2,9 +2,9 @@
 
 Remote Clipboard 是一个 C++17/Qt 跨设备剪贴板同步项目，提供 Linux Wayland GUI、Linux CLI、Windows GUI，以及共享同一服务端核心的 64 MiB / 512 MiB 两种服务端产物。
 
-当前仓库处于 **v0.1 基线**。本版本完成 JSON Lines v1 的构建、安全边界、文件完整性、SQLite 元数据和自动化测试收敛；JWT、设备配对、Protobuf v2、离线队列和插件系统属于后续里程碑，尚未实现。详细边界见 [`docs/18_remediation/v0.1-remediation-plan.md`](docs/18_remediation/v0.1-remediation-plan.md)。
+当前仓库处于 **v0.2 桌面体验版本**。本版本沿用 JSON Lines v1 的安全与文件完整性基线，新增共享锐利风格界面、亮色/暗色主题、中英双语和更可靠的窗口尺寸适配；JWT、设备配对、Protobuf v2、离线队列和插件系统属于后续里程碑，尚未实现。安全基线边界见 [`docs/18_remediation/v0.1-remediation-plan.md`](docs/18_remediation/v0.1-remediation-plan.md)。
 
-## v0.1 能力
+## v0.2 能力
 
 - UTF-8 文本剪贴板广播
 - 小文件 `file_bundle` 传输与 Base64/SHA-256 校验
@@ -14,6 +14,8 @@ Remote Clipboard 是一个 C++17/Qt 跨设备剪贴板同步项目，提供 Linu
 - 可 join 的会话线程与确定的停服语义
 - SQLite WAL 事件元数据、schema migration 和参数化 SQL
 - Windows/Linux 根构建、协议契约、注入回归和真实服务端集成测试
+- Linux/Windows 共享 Qt 界面、亮色/暗色主题和 English/简体中文切换
+- 主窗口与设置窗口在较小尺寸下的重排、伸缩和滚动适配
 
 ## 安全默认值
 
@@ -133,9 +135,9 @@ gh run download --name RemoteClipboard-client-windows-x64
 Linux 原生包安装示例：
 
 ```bash
-sudo apt install ./remote-clipboard-server_0.1.0_amd64.deb
-sudo dnf install ./remote-clipboard-client-0.1.0-1.x86_64.rpm
-sudo pacman -U ./remote-clipboard-client-0.1.0-1-x86_64.pkg.tar.zst
+sudo apt install ./remote-clipboard-server_0.2.0_amd64.deb
+sudo dnf install ./remote-clipboard-client-0.2.0-1.x86_64.rpm
+sudo pacman -U ./remote-clipboard-client-0.2.0-1-x86_64.pkg.tar.zst
 ```
 
 统一源码 ZIP 同时包含服务端和 Linux 客户端构建脚本。安装 README“构建”章节列出的依赖后运行：
@@ -267,7 +269,7 @@ GUI 目录中的旧 `tcpserver.*` / `server_main.cpp` 以及服务器目录中�
 ## 当前限制
 
 - v1 仍是单工作区广播兼容协议，不具备设备级授权或离线可靠投递。
-- 密码认证仅是 v0.1 bootstrap；生产身份、JWT 和设备证明属于 v0.2。
+- 密码认证仍是 bootstrap 方案；生产身份、JWT 和设备证明属于后续里程碑。
 - SQLite 当前只承担事件元数据，不提供用户可见历史 API。
 - Windows CI 构建 GUI、两个服务端和全部测试；Release ZIP 只分发带完整 Qt/MinGW 运行库的 x64 客户端。
 - Release 提供校验和与 GitHub/Sigstore 构建证明；后续仍需补充 SBOM 和自动更新机制。

@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  RC_VERSION: 0.1.0
+  RC_VERSION: 0.2.0
 
 jobs:
   debian-packages:
@@ -181,6 +181,11 @@ jobs:
             grep "scripts/build-server-from-source.sh"
           unzip -l "artifacts/RemoteClipboard-source-${RC_VERSION}.zip" | \
             grep "scripts/build-client-from-source.sh"
+          if unzip -Z1 "artifacts/RemoteClipboard-source-${RC_VERSION}.zip" | \
+            grep -Eq '(^|/)(build|CMakeFiles)/|\.user$|/\.vscode/|/codex_environment_test\.txt$'; then
+            echo "Source package contains generated or machine-local files" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: release-source
@@ -231,4 +236,4 @@ jobs:
           --repo "$GITHUB_REPOSITORY"
           --verify-tag
           --title "Remote Clipboard ${GITHUB_REF_NAME}"
-          --notes-file docs/release-notes/v0.1.0.md
+          --notes-file docs/release-notes/v0.2.0.md

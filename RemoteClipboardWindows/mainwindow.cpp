@@ -2,7 +2,9 @@
 
 #include "clipboardmonitor.h"
 #include "ui_mainwindow.h"
+#include "../gui_common/uilanguage.h"
 #include "../gui_common/settingsdialog.h"
+#include "../gui_common/uitheme.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -26,6 +28,7 @@
 #include <QMimeDatabase>
 #include <QPushButton>
 #include <QShortcut>
+#include <QSizePolicy>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QSystemTrayIcon>
@@ -139,6 +142,8 @@ MainWindow::MainWindow(bool autoStartMode, QWidget *parent)
     , settingsButton(nullptr)
     , hideButton(nullptr)
     , profileComboBox(nullptr)
+    , themeButton(nullptr)
+    , connectionStatusLabel(nullptr)
     , trayIcon(nullptr)
     , showWindowShortcut(nullptr)
     , switchProfileShortcut(nullptr)
@@ -148,11 +153,13 @@ MainWindow::MainWindow(bool autoStartMode, QWidget *parent)
 {
     ui->setupUi(this);
     setupAdvancedControls();
-    setupTray();
     loadSettings();
+    applyColorScheme();
+    setupTray();
     setupConnections();
     setupShortcuts();
     updateConnectButton();
+    setConnectionState(tr("● STANDBY"), QStringLiteral("idle"));
     performAutoConnectIfNeeded();
 }
 
@@ -206,6 +213,7 @@ void MainWindow::setupConnections()
     connect(ui->btnConnect, &QPushButton::clicked, this, &MainWindow::onConnectClicked);
     connect(settingsButton, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
     connect(hideButton, &QPushButton::clicked, this, &MainWindow::hideToTray);
+    connect(themeButton, &QPushButton::clicked, this, &MainWindow::onToggleColorScheme);
     connect(profileComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onProfileChanged);
 
     connect(clipboardMonitor, &ClipboardMonitor::textChanged, this, &MainWindow::onClipboardTextChanged);
@@ -221,57 +229,46 @@ void MainWindow::setupConnections()
 
 void MainWindow::setupAdvancedControls()
 {
-    auto profileLabel = new QLabel(tr("Profile:"), this);
-    profileComboBox = new QComboBox(this);
-    settingsButton = new QPushButton(tr("Settings"), this);
-    hideButton = new QPushButton(tr("Hide"), this);
-    auto profileRow = new QHBoxLayout();
-    profileRow->setContentsMargins(0, 0, 0, 0);
-    profileRow->addWidget(profileComboBox, 1);
-    profileRow->addWidget(settingsButton);
-    profileRow->addWidget(hideButton);
-    auto profileContainer = new QWidget(this);
-    profileContainer->setLayout(profileRow);
+    profileComboBox = ui->profileComboBox;
+    settingsButton = ui->settingsButton;
+    hideButton = ui->hideButton;
+    receiveDirectoryEdit = ui->receiveDirectoryEdit;
+    tlsCheckBox = ui->tlsCheckBox;
+    caCertificateEdit = ui->caCertificateEdit;
+    themeButton = ui->themeButton;
+    connectionStatusLabel = ui->connectionStatusLabel;
+    settingsButton->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
 
-    auto receiveDirectoryLabel = new QLabel(tr("Receive Dir:"), this);
-    receiveDirectoryEdit = new QLineEdit(this);
-    auto receiveDirectoryButton = new QPushButton(tr("Browse"), this);
-    auto receiveDirectoryLayout = new QHBoxLayout();
-    receiveDirectoryLayout->setContentsMargins(0, 0, 0, 0);
-    receiveDirectoryLayout->addWidget(receiveDirectoryEdit);
-    receiveDirectoryLayout->addWidget(receiveDirectoryButton);
-    auto receiveDirectoryContainer = new QWidget(this);
-    receiveDirectoryContainer->setLayout(receiveDirectoryLayout);
+    const QList<QLabel*> fieldLabels = {
+        ui->serverLabel,
+        ui->portLabel,
+        ui->usernameLabel,
+        ui->passwordLabel,
+        ui->profileLabel,
+        ui->receiveDirectoryLabel,
+        ui->caCertificateLabel
+    };
+    for (QLabel* label : fieldLabels) {
+        label->setObjectName(QStringLiteral("fieldLabel"));
+    }
 
-    auto tlsLabel = new QLabel(tr("Enable TLS:"), this);
-    tlsCheckBox = new QCheckBox(tr("Use TLS (optional)"), this);
+    ui->clientGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    ui->gridLayout->setColumnStretch(1, 3);
+    ui->gridLayout->setColumnStretch(3, 2);
+    ui->verticalLayout->setStretchFactor(ui->logGroup, 1);
 
-    auto caCertificateLabel = new QLabel(tr("CA Cert:"), this);
-    caCertificateEdit = new QLineEdit(this);
-    auto caCertificateButton = new QPushButton(tr("Browse"), this);
-    auto caCertificateLayout = new QHBoxLayout();
-    caCertificateLayout->setContentsMargins(0, 0, 0, 0);
-    caCertificateLayout->addWidget(caCertificateEdit);
-    caCertificateLayout->addWidget(caCertificateButton);
-    auto caCertificateContainer = new QWidget(this);
-    caCertificateContainer->setLayout(caCertificateLayout);
-
-    ui->gridLayout->addWidget(profileLabel, 4, 0);
-    ui->gridLayout->addWidget(profileContainer, 4, 1);
-    ui->gridLayout->addWidget(receiveDirectoryLabel, 5, 0);
-    ui->gridLayout->addWidget(receiveDirectoryContainer, 5, 1);
-    ui->gridLayout->addWidget(tlsLabel, 6, 0);
-    ui->gridLayout->addWidget(tlsCheckBox, 6, 1);
-    ui->gridLayout->addWidget(caCertificateLabel, 7, 0);
-    ui->gridLayout->addWidget(caCertificateContainer, 7, 1);
-    ui->gridLayout->addWidget(ui->btnConnect, 8, 0, 1, 2);
-
-    connect(receiveDirectoryButton, &QPushButton::clicked, this, &MainWindow::onBrowseReceiveDirectory);
-    connect(caCertificateButton, &QPushButton::clicked, this, &MainWindow::onBrowseCaCertificate);
+    connect(ui->receiveDirectoryButton, &QPushButton::clicked, this, &MainWindow::onBrowseReceiveDirectory);
+    connect(ui->caCertificateButton, &QPushButton::clicked, this, &MainWindow::onBrowseCaCertificate);
 }
 
 void MainWindow::setupTray()
 {
+    if (trayIcon != nullptr) {
+        trayIcon->hide();
+        delete trayIcon;
+        trayIcon = nullptr;
+    }
+
     trayIcon = new QSystemTrayIcon(this);
     trayIcon->setIcon(windowIcon().isNull()
         ? style()->standardIcon(QStyle::SP_ComputerIcon)
@@ -312,6 +309,7 @@ void MainWindow::loadSettings()
     if (appConfig.receiveDirectory.isEmpty()) {
         appConfig.receiveDirectory = defaultReceiveDirectory();
     }
+    applyLanguage();
     if (appConfig.autoStartEnabled != autoStartManager.isEnabled()) {
         applyAutoStart();
     }
@@ -348,10 +346,8 @@ void MainWindow::syncProfileFromUi()
         return;
     }
 
-    bool ok = false;
-    const quint16 parsedPort = ui->portEdit->text().toUShort(&ok);
     profile->host = ui->serverAddressEdit->text().trimmed();
-    profile->port = ok ? parsedPort : profile->port;
+    profile->port = static_cast<quint16>(ui->portSpinBox->value());
     profile->username = ui->usernameEdit->text().trimmed();
     profile->password = ui->passwordEdit->text();
     profile->useTls = tlsCheckBox->isChecked();
@@ -409,7 +405,50 @@ void MainWindow::updateStatus(const QString &message)
 
 void MainWindow::updateConnectButton()
 {
-    ui->btnConnect->setText(connectionRequested ? tr("Disconnect") : tr("Connect"));
+    ui->btnConnect->setText(connectionRequested ? tr("DISCONNECT // STOP") : tr("CONNECT // START"));
+    ui->btnConnect->setProperty("active", connectionRequested);
+    ui->btnConnect->style()->unpolish(ui->btnConnect);
+    ui->btnConnect->style()->polish(ui->btnConnect);
+}
+
+void MainWindow::applyLanguage()
+{
+    appConfig.language = normalizedUiLanguage(appConfig.language);
+    applyUiLanguage(*qApp, appConfig.language);
+    ui->retranslateUi(this);
+    updateConnectButton();
+
+    if (tcpClient->isAuthenticated()) {
+        setConnectionState(tr("● SYNC ONLINE"), QStringLiteral("online"));
+    } else if (connectionRequested) {
+        setConnectionState(tr("◆ CONNECTING"), QStringLiteral("pending"));
+    } else {
+        setConnectionState(tr("● STANDBY"), QStringLiteral("idle"));
+    }
+}
+
+void MainWindow::applyColorScheme()
+{
+    const UiColorScheme scheme = uiColorSchemeFromName(appConfig.colorScheme);
+    applyUiColorScheme(*qApp, scheme);
+    themeButton->setText(scheme == UiColorScheme::Dark ? tr("LIGHT MODE ↗") : tr("DARK MODE ↗"));
+}
+
+void MainWindow::setConnectionState(const QString& label, const QString& state)
+{
+    connectionStatusLabel->setText(label);
+    connectionStatusLabel->setProperty("connectionState", state);
+    connectionStatusLabel->style()->unpolish(connectionStatusLabel);
+    connectionStatusLabel->style()->polish(connectionStatusLabel);
+}
+
+void MainWindow::onToggleColorScheme()
+{
+    const UiColorScheme current = uiColorSchemeFromName(appConfig.colorScheme);
+    appConfig.colorScheme = uiColorSchemeName(
+        current == UiColorScheme::Dark ? UiColorScheme::Light : UiColorScheme::Dark);
+    applyColorScheme();
+    saveSettings();
 }
 
 QString MainWindow::defaultReceiveDirectory() const
@@ -745,6 +784,7 @@ void MainWindow::onConnectClicked()
         clipboardMonitor->stopMonitoring();
         tcpClient->disconnectFromServer();
         updateConnectButton();
+        setConnectionState(tr("● STANDBY"), QStringLiteral("idle"));
         updateStatus(tr("Disconnect requested"));
         return;
     }
@@ -755,13 +795,6 @@ void MainWindow::onConnectClicked()
         return;
     }
 
-    bool ok = false;
-    const quint16 port = ui->portEdit->text().toUShort(&ok);
-    if (!ok || port < 1024) {
-        QMessageBox::warning(this, tr("Invalid Port"), tr("Please enter a valid port number."));
-        return;
-    }
-
     if (!ensureReceiveDirectoryReady()) {
         return;
     }
@@ -769,11 +802,12 @@ void MainWindow::onConnectClicked()
     saveSettings();
     connectionRequested = true;
     updateConnectButton();
+    setConnectionState(tr("◆ CONNECTING"), QStringLiteral("pending"));
     updateStatus(tr("Connecting to server..."));
 
     tcpClient->connectToServer(
         ui->serverAddressEdit->text().trimmed(),
-        port,
+        static_cast<quint16>(ui->portSpinBox->value()),
         tlsCheckBox->isChecked(),
         caCertificateEdit->text().trimmed(),
         true
@@ -821,6 +855,7 @@ void MainWindow::onClipboardFilesChanged(const QStringList& filePaths)
 
 void MainWindow::handleConnected()
 {
+    setConnectionState(tr("◆ AUTHENTICATING"), QStringLiteral("pending"));
     updateStatus(tr("Transport connected, sending authentication"));
     QJsonObject authRequest;
     authRequest["type"] = "auth";
@@ -832,12 +867,15 @@ void MainWindow::handleConnected()
 void MainWindow::handleDisconnected()
 {
     clipboardMonitor->stopMonitoring();
+    setConnectionState(connectionRequested ? tr("× RECONNECTING") : tr("● STANDBY"),
+        connectionRequested ? QStringLiteral("error") : QStringLiteral("idle"));
     updateStatus(connectionRequested ? tr("Connection lost") : tr("Disconnected"));
     updateConnectButton();
 }
 
 void MainWindow::handleError(const QString& error)
 {
+    setConnectionState(tr("× NETWORK ERROR"), QStringLiteral("error"));
     updateStatus(tr("Network error: %1").arg(error));
 }
 
@@ -845,6 +883,7 @@ void MainWindow::handleAuthResponse(const QJsonObject& response)
 {
     const bool success = response.value("status").toString() == "ok";
     if (success) {
+        setConnectionState(tr("● SYNC ONLINE"), QStringLiteral("online"));
         updateStatus(tr("Authenticated successfully"));
         clipboardMonitor->startMonitoring();
         if (const ConnectionProfile* profile = currentProfile()) {
@@ -863,6 +902,7 @@ void MainWindow::handleAuthResponse(const QJsonObject& response)
     connectionRequested = false;
     clipboardMonitor->stopMonitoring();
     updateConnectButton();
+    setConnectionState(tr("× AUTH FAILED"), QStringLiteral("error"));
     QMessageBox::warning(this, tr("Authentication Failed"),
                          response.value("message").toString(tr("Unknown error")));
     tcpClient->disconnectFromServer();
@@ -941,7 +981,10 @@ void MainWindow::onOpenSettings()
     }
 
     saveSettings();
+    applyLanguage();
+    applyColorScheme();
     applyConfigToUi();
+    setupTray();
     setupShortcuts();
     updateStatus(tr("Settings updated. Config file: %1").arg(configStore.configPath()));
 }
@@ -959,7 +1002,7 @@ void MainWindow::onProfileChanged(int index)
     }
 
     ui->serverAddressEdit->setText(profile->host);
-    ui->portEdit->setText(QString::number(profile->port));
+    ui->portSpinBox->setValue(profile->port);
     ui->usernameEdit->setText(profile->username);
     ui->passwordEdit->setText(profile->password);
     tlsCheckBox->setChecked(profile->useTls);

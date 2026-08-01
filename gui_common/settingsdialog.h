@@ -5,6 +5,7 @@
 #include "clientconfig.h"
 
 class QCheckBox;
+class QComboBox;
 class QKeySequenceEdit;
 class QLineEdit;
 class QListWidget;
@@ -46,6 +47,7 @@ private:
     QCheckBox* useTlsCheckBox_ = nullptr;
     QLineEdit* caCertificateEdit_ = nullptr;
     QLineEdit* receiveDirectoryEdit_ = nullptr;
+    QComboBox* languageComboBox_ = nullptr;
     QCheckBox* autoStartCheckBox_ = nullptr;
     QCheckBox* autoConnectCheckBox_ = nullptr;
     QKeySequenceEdit* showWindowShortcutEdit_ = nullptr;

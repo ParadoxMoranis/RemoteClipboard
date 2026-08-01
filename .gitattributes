@@ -1,0 +1,8 @@
+/.github export-ignore
+/.vscode export-ignore
+/codex_environment_test.txt export-ignore
+/RemoteClipboardServer-512MB/build export-ignore
+/RemoteClipboardWindows/*.user export-ignore
+/RemoteClipboard_Linux_wayland/build export-ignore
+/RemoteClipboard_Linux_wayland/*.user export-ignore
+/RemoteclipboardCliForLinux/build export-ignore

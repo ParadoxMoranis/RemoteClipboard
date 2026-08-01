@@ -8,7 +8,7 @@
 #include <QUuid>
 
 namespace {
-constexpr int kConfigVersion = 2;
+constexpr int kConfigVersion = 4;
 constexpr auto kOrgName = "RemoteClipboard";
 }
 
@@ -81,6 +81,14 @@ GuiAppConfig GuiConfigStore::load() const
     config.receiveDirectory = root.value(QStringLiteral("receive_directory")).toString();
     config.autoStartEnabled = root.value(QStringLiteral("autostart_enabled")).toBool(false);
     config.autoConnectLastProfile = root.value(QStringLiteral("autoconnect_last_profile")).toBool(true);
+    config.colorScheme = root.value(QStringLiteral("color_scheme")).toString(QStringLiteral("light"));
+    if (config.colorScheme != QStringLiteral("dark")) {
+        config.colorScheme = QStringLiteral("light");
+    }
+    config.language = root.value(QStringLiteral("language")).toString(QStringLiteral("en"));
+    if (config.language != QStringLiteral("zh_CN")) {
+        config.language = QStringLiteral("en");
+    }
     config.showWindowShortcut = QKeySequence(root.value(QStringLiteral("show_window_shortcut"))
         .toString(QStringLiteral("Ctrl+Alt+V")));
     config.switchProfileShortcut = QKeySequence(root.value(QStringLiteral("switch_profile_shortcut"))
@@ -126,6 +134,8 @@ bool GuiConfigStore::save(const GuiAppConfig& config, QString* errorMessage) con
     root.insert(QStringLiteral("receive_directory"), config.receiveDirectory);
     root.insert(QStringLiteral("autostart_enabled"), config.autoStartEnabled);
     root.insert(QStringLiteral("autoconnect_last_profile"), config.autoConnectLastProfile);
+    root.insert(QStringLiteral("color_scheme"), config.colorScheme);
+    root.insert(QStringLiteral("language"), config.language);
     root.insert(QStringLiteral("show_window_shortcut"), config.showWindowShortcut.toString(QKeySequence::PortableText));
     root.insert(QStringLiteral("switch_profile_shortcut"), config.switchProfileShortcut.toString(QKeySequence::PortableText));
 
