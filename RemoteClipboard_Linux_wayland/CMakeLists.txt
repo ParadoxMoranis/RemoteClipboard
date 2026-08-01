@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(RemotePostboard VERSION 0.2.0 LANGUAGES CXX)
+project(RemotePostboard VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOUIC ON)

@@ -71,9 +71,26 @@ jobs:
       - name: Stage Windows package
         shell: msys2 {0}
         run: bash scripts/stage-windows-package.sh build dist
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress --yes
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not installed"
+          }
+      - name: Build and verify Windows installer
+        shell: pwsh
+        run: |
+          ./scripts/build-windows-installer.ps1
+          ./scripts/verify-windows-installer.ps1
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
           name: RemoteClipboard-client-windows-x64
-          path: dist/RemoteClipboard-client-windows-x64.zip
+          path: |
+            dist/RemoteClipboard-client-windows-x64.zip
+            dist/RemoteClipboard-client-windows-x64-setup.exe
           if-no-files-found: error

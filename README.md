@@ -129,15 +129,18 @@ gh run download --name RemoteClipboard-client-windows-x64
 | Linux 客户端 | Debian 12 | `remote-clipboard-client_<version>_amd64.deb` |
 | Linux 客户端 | Fedora 42 | `remote-clipboard-client-<version>-1.x86_64.rpm` |
 | Linux 客户端 | Arch Linux | `remote-clipboard-client-<version>-1-x86_64.pkg.tar.zst` |
+| Windows 客户端安装器 | Windows x64 | `RemoteClipboard-client-windows-x64-setup.exe` |
 | Windows 客户端 | Windows x64 | `RemoteClipboard-client-windows-x64.zip` |
 | 服务端与客户端源码 | 通用 | `RemoteClipboard-source-<version>.zip` |
+
+Windows 推荐使用 `setup.exe`，它提供开始菜单快捷方式、可选桌面快捷方式和标准卸载入口；需要免安装运行时使用便携 ZIP。
 
 Linux 原生包安装示例：
 
 ```bash
-sudo apt install ./remote-clipboard-server_0.2.0_amd64.deb
-sudo dnf install ./remote-clipboard-client-0.2.0-1.x86_64.rpm
-sudo pacman -U ./remote-clipboard-client-0.2.0-1-x86_64.pkg.tar.zst
+sudo apt install ./remote-clipboard-server_0.2.1_amd64.deb
+sudo dnf install ./remote-clipboard-client-0.2.1-1.x86_64.rpm
+sudo pacman -U ./remote-clipboard-client-0.2.1-1-x86_64.pkg.tar.zst
 ```
 
 统一源码 ZIP 同时包含服务端和 Linux 客户端构建脚本。安装 README“构建”章节列出的依赖后运行：
@@ -153,7 +156,7 @@ sudo pacman -U ./remote-clipboard-client-0.2.0-1-x86_64.pkg.tar.zst
 
 ```bash
 sha256sum --check SHA256SUMS
-gh attestation verify RemoteClipboard-client-windows-x64.zip \
+gh attestation verify RemoteClipboard-client-windows-x64-setup.exe \
   --repo ParadoxMoranis/RemoteClipboard
 ```
 
@@ -271,6 +274,6 @@ GUI 目录中的旧 `tcpserver.*` / `server_main.cpp` 以及服务器目录中�
 - v1 仍是单工作区广播兼容协议，不具备设备级授权或离线可靠投递。
 - 密码认证仍是 bootstrap 方案；生产身份、JWT 和设备证明属于后续里程碑。
 - SQLite 当前只承担事件元数据，不提供用户可见历史 API。
-- Windows CI 构建 GUI、两个服务端和全部测试；Release ZIP 只分发带完整 Qt/MinGW 运行库的 x64 客户端。
+- Windows CI 构建 GUI、两个服务端和全部测试；Release 同时提供经过静默安装/卸载验证的 x64 安装器和带完整 Qt/MinGW 运行库的便携 ZIP。安装器尚未使用商业 Authenticode 证书签名，SmartScreen 可能显示未知发布者。
 - Release 提供校验和与 GitHub/Sigstore 构建证明；后续仍需补充 SBOM 和自动更新机制。
 - 仓库尚未声明许可证，公开分发前需完成依赖许可证审查并补充许可证。
